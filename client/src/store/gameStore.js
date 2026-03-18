@@ -384,10 +384,10 @@ function ensureSocket() {
   connecting = true;
 
   socket = io({
-    autoConnect: true,
-    transports: ["websocket"], // ✅ best for Render + many clients
-    withCredentials: false,
-  });
+  autoConnect: true,
+  transports: ["websocket", "polling"],  // ← add "polling"
+  withCredentials: false,
+});
   let rosterPollTimer = null;
 
     const startRosterPoll = () => {

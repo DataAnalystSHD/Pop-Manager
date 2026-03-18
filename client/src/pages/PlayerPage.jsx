@@ -756,11 +756,11 @@ function PopcatFullScreen({
           }} title="Adjust UI height">
             <button onClick={() => setUiLift((v) => Math.min(120, v + 10))}
               style={{ borderRadius: 999, border: `1px solid ${GLASS_STROKE}`, background: "rgba(255,255,255,.65)", padding: "6px 10px", cursor: "pointer", fontWeight: 1000, color: TXT }}>
-              +
+              ↑
             </button>
             <button onClick={() => setUiLift((v) => Math.max(0, v - 10))}
               style={{ borderRadius: 999, border: `1px solid ${GLASS_STROKE}`, background: "rgba(255,255,255,.65)", padding: "6px 10px", cursor: "pointer", fontWeight: 1000, color: TXT }}>
-              −
+              ↓
             </button>
           </div>
         </div>
