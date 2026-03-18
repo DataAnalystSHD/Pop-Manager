@@ -1,0 +1,55 @@
+:root{
+  --bg0:#070a12;
+  --card: rgba(255,255,255,.06);
+  --stroke: rgba(148,163,184,.22);
+  --stroke2: rgba(148,163,184,.16);
+  --txt: rgba(255,255,255,.92);
+  --muted: rgba(226,232,240,.70);
+  --muted2: rgba(226,232,240,.62);
+
+  --good: rgba(34,211,238,.35);
+  --bad: rgba(248,113,113,.35);
+  --goodBg: rgba(2,6,23,.25);
+  --badBg: rgba(2,6,23,.25);
+
+  --r: 18px;
+  --r2: 14px;
+}
+
+*{ box-sizing: border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  color: var(--txt);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background:
+    radial-gradient(1000px 600px at 15% -10%, rgba(34,211,238,.16), transparent 60%),
+    radial-gradient(900px 500px at 85% 10%, rgba(124,58,237,.20), transparent 55%),
+    radial-gradient(900px 600px at 50% 120%, rgba(99,102,241,.14), transparent 55%),
+    var(--bg0);
+}
+
+a{ color: inherit; }
+
+.container{
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.grid2{
+  display:grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 14px;
+}
+
+.gridAdmin{
+  display:grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 880px){
+  .grid2{ grid-template-columns: 1fr; }
+  .gridAdmin{ grid-template-columns: 1fr; }
+}
