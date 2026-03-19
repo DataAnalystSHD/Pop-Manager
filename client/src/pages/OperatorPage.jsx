@@ -648,7 +648,7 @@ export default function OperatorPage() {
     if (confirmAction === "reset") {
       return {
         title: "ยืนยันการรีเซ็ตห้อง",
-        desc: "การกระทำนี้อาจล้างผู้เล่นทั้งหมดและเริ่มห้องใหม่",
+        desc: "การกระทำนี้จะล้างผู้เล่นทั้งหมดและเริ่มห้องใหม่",
         label: "ยืนยันรีเซ็ตห้อง",
         onConfirm: resetRoom,
         tone: "danger",
@@ -889,7 +889,7 @@ export default function OperatorPage() {
 
                   <ActionButton
                     label="รีเซ็ตห้อง"
-                    sublabel="เริ่มห้องใหม่ทั้งหมด อาจเตะผู้เล่นออก"
+                    sublabel="เริ่มห้องใหม่ทั้งหมด จะเตะผู้เล่นออก"
                     icon={<Icon name="warning" size={18} />}
                     tone="danger"
                     onClick={() => setConfirmAction("reset")}
