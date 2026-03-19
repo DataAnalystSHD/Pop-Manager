@@ -1,3 +1,4 @@
+// C:\Users\User\Documents\pop-manager-fixed\server\src\sockets\game.handlers.js
 import { state, getPlayerBySocketId } from "../state.js";
 
 const MAX_CLICKS_PER_SEC = 20;

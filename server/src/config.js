@@ -12,7 +12,15 @@ if (!process.env.ADMIN_KEY) {
   );
 }
 export const ADMIN_KEY = process.env.ADMIN_KEY || "shd-admin";
+export const OPERATOR_KEY = process.env.OPERATOR_KEY || "shd-operator";
+export function isAdminKey(key) {
+  return !!ADMIN_KEY && String(key || "") === ADMIN_KEY;
+}
 
+export function isOperatorKey(key) {
+  const k = String(key || "");
+  return (!!ADMIN_KEY && k === ADMIN_KEY) || (!!OPERATOR_KEY && k === OPERATOR_KEY);
+}
 export const DEFAULT_CFG = {
   lobbySeconds: 10,
   matchSeconds: 90,
@@ -29,3 +37,4 @@ export const DEFAULT_CFG = {
   mode: "SOLO",
   maxTeamSize: 5,
 };
+

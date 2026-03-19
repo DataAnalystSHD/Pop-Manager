@@ -1,33 +1,39 @@
-// client/src/App.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { createSocket } from "./lib/socket.js";
 import { setState } from "./store/gameStore.js";
 import PlayerPage from "./pages/PlayerPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import OperatorPage from "./pages/OperatorPage.jsx";
 import ScreenPage from "./pages/ScreenPage.jsx";
 
 function usePath() {
   const [p, setP] = useState(window.location.pathname || "/");
+
   useEffect(() => {
     const onPop = () => setP(window.location.pathname || "/");
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
   const nav = (to) => {
     window.history.pushState({}, "", to);
     setP(to);
   };
+
   return { path: p, nav };
 }
 
 function roleFromPath(path) {
-  if (String(path || "").startsWith("/screen")) return "screen";
-  if (String(path || "").startsWith("/admin")) return "admin";
+  const p = String(path || "");
+  if (p.startsWith("/screen")) return "screen";
+  if (p.startsWith("/admin")) return "admin";
+  if (p.startsWith("/operator")) return "operator";
   return "player";
 }
 
 function DebugBanner() {
   const [ok, setOk] = useState(true);
+
   useEffect(() => {
     const onErr = () => setOk(false);
     window.addEventListener("error", onErr);
@@ -39,6 +45,7 @@ function DebugBanner() {
   }, []);
 
   if (ok) return null;
+
   return (
     <div style={{ position: "fixed", bottom: 12, left: 12, right: 12, zIndex: 99999 }}>
       <div
@@ -61,7 +68,7 @@ export default function App() {
   const { path, nav } = usePath();
   const role = useMemo(() => roleFromPath(path), [path]);
 
-  const [bootMsg, setBootMsg] = useState("Booting…");
+  const [, setBootMsg] = useState("Booting…");
   useEffect(() => {
     setBootMsg(`Booted. Path: ${window.location.pathname || "/"}`);
   }, []);
@@ -77,8 +84,7 @@ export default function App() {
       console.log("[socket] join_role ->", r);
       s.emit("join_role", { role: r });
 
-      // screen/admin usually need roster immediately
-      if (r === "screen" || r === "admin") {
+      if (r === "screen" || r === "admin" || r === "operator") {
         s.emit("request_roster");
       }
     };
@@ -113,18 +119,18 @@ export default function App() {
     });
 
     s.on("top_update", (p) => {
-    console.log("[socket] top_update", {
-      topPlayersLen: p?.topPlayers?.length,
-      sample: p?.topPlayers?.[0],
-      mode: p?.mode,
-    });
-    setState({
-      topPlayers: p.topPlayers || [],
-      topTeams: p.topTeams || [],
-    });
-  });
+      console.log("[socket] top_update", {
+        topPlayersLen: p?.topPlayers?.length,
+        sample: p?.topPlayers?.[0],
+        mode: p?.mode,
+      });
 
-    // roster pushed by server (screen/admin) OR via request_roster
+      setState({
+        topPlayers: p.topPlayers || [],
+        topTeams: p.topTeams || [],
+      });
+    });
+
     s.on("roster", ({ roster }) => {
       setState({ roster: Array.isArray(roster) ? roster : [] });
     });
@@ -132,8 +138,10 @@ export default function App() {
     let warnTimer = null;
     s.on("event_warning", ({ seconds }) => {
       if (warnTimer) clearInterval(warnTimer);
+
       let left = Number(seconds || 3);
       setState({ warn: { left } });
+
       warnTimer = setInterval(() => {
         left -= 1;
         if (left <= 0) {
@@ -149,14 +157,18 @@ export default function App() {
     s.on("event_start", ({ type, endsAt }) => {
       setState({ event: { active: true, type, endsAt: endsAt || null } });
       setState({
-        toast: { type: type === "BOMB" ? "bad" : "good", msg: type === "BOMB" ? "💣 BOMB (-5)" : "✨ BONUS (+2)" },
+        toast: {
+          type: type === "BOMB" ? "bad" : "good",
+          msg: type === "BOMB" ? "💣 BOMB (-5)" : "✨ BONUS (+2)",
+        },
       });
       setTimeout(() => setState({ toast: null }), 1200);
     });
 
-    s.on("event_end", () => setState({ event: { active: false, type: null, endsAt: null } }));
+    s.on("event_end", () => {
+      setState({ event: { active: false, type: null, endsAt: null } });
+    });
 
-    // expose helper for manual debugging
     window.__JOIN_ROLE__ = emitRole;
 
     return () => {
@@ -168,21 +180,25 @@ export default function App() {
       window.__SOCKET__ = null;
       window.__JOIN_ROLE__ = null;
     };
-  }, []); // create socket once
+  }, []);
 
-  // ✅ whenever path changes, re-join correct role room
   useEffect(() => {
     const s = window.__SOCKET__;
     if (!s || !s.connected) return;
 
     console.log("[socket] path changed -> join_role", role);
     s.emit("join_role", { role });
-    if (role === "screen" || role === "admin") s.emit("request_roster");
+
+    if (role === "screen" || role === "admin" || role === "operator") {
+      s.emit("request_roster");
+    }
   }, [role]);
 
   let page = null;
+
   try {
     if (path === "/admin") page = <AdminPage nav={nav} />;
+    else if (path === "/operator") page = <OperatorPage nav={nav} />;
     else if (path === "/screen") page = <ScreenPage nav={nav} />;
     else page = <PlayerPage nav={nav} />;
   } catch (e) {

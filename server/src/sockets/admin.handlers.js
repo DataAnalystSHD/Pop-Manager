@@ -1,47 +1,138 @@
 // server/src/sockets/admin.handlers.js
-import { ADMIN_KEY, DEFAULT_CFG } from "../config.js";
-import { state, CFG, resetAllScores } from "../state.js"; // ✅ add resetAllScores
+import { ADMIN_KEY, DEFAULT_CFG, isAdminKey, isOperatorKey } from "../config.js";
+import { state, CFG, resetAllScores } from "../state.js";
 import { clampInt } from "../utils/clamp.js";
 import { startLobby, pauseMatch, resumeMatch, endMatch } from "../services/match.service.js";
 import { cleanupRoomAvatars } from "./player.handlers.js";
 
+function ensureAdmin(socket) {
+  return state.admins.has(socket.id);
+}
+
+function ensureOperator(socket) {
+  return state.admins.has(socket.id) || state.operators?.has?.(socket.id);
+}
+
 export function attachAdminHandlers(io, socket, broadcastState, broadcastTop) {
+  // make sure operators set exists
+  if (!state.operators) state.operators = new Set();
+
   socket.on("admin_login", ({ key }) => {
-    if (String(key || "") === ADMIN_KEY) {
+    if (isAdminKey(key)) {
       state.admins.add(socket.id);
-      // FIX #5: After auth, move this socket into the protected "admin" room
-      // so it receives scores_delta, roster, and admin broadcasts going forward.
+      state.operators.delete(socket.id);
+
       socket.leave("players");
       socket.join("admin");
-      socket.emit("admin_ok", { ok: true });
+
+      socket.emit("admin_ok", { ok: true, role: "admin" });
       socket.emit("toast", { type: "good", message: "Admin authenticated" });
       broadcastState();
-    } else {
-      socket.emit("admin_ok", { ok: false });
-      socket.emit("toast", { type: "error", message: "Wrong admin key" });
+      return;
     }
+
+    socket.emit("admin_ok", { ok: false });
+    socket.emit("toast", { type: "error", message: "Wrong admin key" });
   });
 
-  socket.on("admin_room_toggle", ({ open }) => {
-    if (!state.admins.has(socket.id)) return;
+  // NEW: operator login
+  socket.on("operator_login", ({ key }) => {
+    if (isOperatorKey(key)) {
+      if (!isAdminKey(key)) {
+        state.operators.add(socket.id);
+      } else {
+        state.admins.add(socket.id);
+      }
+
+      socket.leave("players");
+      socket.join("admin");
+
+      socket.emit("operator_ok", {
+        ok: true,
+        role: isAdminKey(key) ? "admin" : "operator",
+      });
+      socket.emit("toast", { type: "good", message: "Operator authenticated" });
+      broadcastState();
+      return;
+    }
+
+    socket.emit("operator_ok", { ok: false });
+    socket.emit("toast", { type: "error", message: "Wrong operator key" });
+  });
+
+  socket.on("disconnect", () => {
+    state.admins.delete(socket.id);
+    state.operators?.delete?.(socket.id);
+  });
+
+  // GAMEPLAY ONLY -> operator allowed
+  socket.on("admin_room_toggle", ({ open, adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     state.roomOpen = !!open;
     broadcastState();
   });
 
-  socket.on("admin_config", (payload) => {
-    if (!state.admins.has(socket.id)) return;
+  // GAMEPLAY SETTINGS ONLY -> operator allowed
+  socket.on("admin_config", (payload = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(payload.adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(payload.adminKey)) {
+      if (!isAdminKey(payload.adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     const p = payload || {};
 
     if (p.mode === "SOLO" || p.mode === "TEAM") CFG.mode = p.mode;
 
-    const lobby = clampInt(p.lobbySeconds, 3, 120);
-    const match = clampInt(p.matchSeconds, 10, 1200);
-    const warn = clampInt(p.warnSeconds, 1, 10);
-    const eMin = clampInt(p.eventSecondsMin, 1, 8);
-    const eMax = clampInt(p.eventSecondsMax, 1, 12);
-    const bMin = clampInt(p.betweenEventSecondsMin, 2, 30);
-    const bMax = clampInt(p.betweenEventSecondsMax, 2, 60);
-    const maxTeamSize = clampInt(p.maxTeamSize, 1, 50);
+    const lobby = clampInt(
+      p.lobbySeconds ?? p.lobbySec,
+      3,
+      120
+    );
+    const match = clampInt(
+      p.matchSeconds ?? p.matchSec,
+      10,
+      1200
+    );
+    const warn = clampInt(
+      p.warnSeconds ?? p.warnSec,
+      1,
+      10
+    );
+    const eMin = clampInt(
+      p.eventSecondsMin ?? p.eventMinSec,
+      1,
+      8
+    );
+    const eMax = clampInt(
+      p.eventSecondsMax ?? p.eventMaxSec,
+      1,
+      12
+    );
+    const bMin = clampInt(
+      p.betweenEventSecondsMin ?? p.betweenMinSec,
+      2,
+      30
+    );
+    const bMax = clampInt(
+      p.betweenEventSecondsMax ?? p.betweenMaxSec,
+      2,
+      60
+    );
+    const maxTeamSize = clampInt(
+      p.maxTeamSize,
+      1,
+      50
+    );
 
     if (lobby !== null) CFG.lobbySeconds = lobby;
     if (match !== null) CFG.matchSeconds = match;
@@ -59,53 +150,72 @@ export function attachAdminHandlers(io, socket, broadcastState, broadcastTop) {
     broadcastTop();
   });
 
-  socket.on("admin_start", () => {
-    if (!state.admins.has(socket.id)) return;
+  // GAMEPLAY ONLY -> operator allowed
+  socket.on("admin_start", ({ adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     if (state.phase === "playing" || state.phase === "lobby") return;
     startLobby(io, broadcastState, broadcastTop);
   });
 
-  socket.on("admin_pause_toggle", () => {
-    if (!state.admins.has(socket.id)) return;
+  // GAMEPLAY ONLY -> operator allowed
+  socket.on("admin_pause_toggle", ({ adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     if (state.phase === "playing") pauseMatch(broadcastState, broadcastTop);
     else if (state.phase === "paused") resumeMatch(io, broadcastState, broadcastTop);
   });
 
-  socket.on("admin_end", () => {
-    if (!state.admins.has(socket.id)) return;
+  // GAMEPLAY ONLY -> operator allowed
+  socket.on("admin_end", ({ adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     if (state.phase === "idle") return;
     endMatch(io, broadcastState, broadcastTop, "Ended by admin");
   });
 
   /**
-   * ✅ Reset Room:
-   * - close room
-   * - reset phase/timers/event
-   * - force logout all players
-   * - clear ALL player maps (including playersByPid + disconnect timers)
-   * - ✅ delete old avatars in Supabase storage (cleanupRoomAvatars)
+   * Reset Room
+   * GAMEPLAY ONLY -> operator allowed
    */
-  socket.on("admin_reset_room", async () => {
-    if (!state.admins.has(socket.id)) return;
+  socket.on("admin_reset_room", async ({ adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
 
-    // 1) stop accepting joins
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
+
     state.roomOpen = false;
 
-    // 2) force logout everyone (use correct socket id field)
     for (const p of state.players.values()) {
-      const sid = p?._socketId || p?.id; // ✅ correct based on your player structure
+      const sid = p?._socketId || p?.id;
       if (sid) io.to(sid).emit("force_logout", { reason: "Room reset" });
     }
 
-    // 3) ✅ delete avatars stored in supabase (best-effort)
-    // IMPORTANT: do this BEFORE clearing playersByPid (it needs avatarPath)
     try {
       await cleanupRoomAvatars();
-    } catch {
-      // ignore cleanup errors (do not block reset)
-    }
+    } catch {}
 
-    // 4) clear reconnect timers (avoid memory leaks)
     if (state._pidDisconnectTimers && typeof state._pidDisconnectTimers.forEach === "function") {
       for (const t of state._pidDisconnectTimers.values()) {
         try {
@@ -115,15 +225,11 @@ export function attachAdminHandlers(io, socket, broadcastState, broadcastTop) {
       state._pidDisconnectTimers.clear();
     }
 
-    // 5) clear all players maps
     state.players.clear();
     state.playersByPid?.clear?.();
     state.socketIndex.clear();
-
-    // OPTIONAL: if you have teams map in state, clear it too (safe guard)
     state.teamRooms?.clear?.();
 
-    // 6) reset match state
     state.phase = "idle";
     state.matchId = null;
     state.round = 0;
@@ -131,22 +237,30 @@ export function attachAdminHandlers(io, socket, broadcastState, broadcastTop) {
     state.matchEndsAt = null;
     state.event = { active: false, type: null, endsAt: null };
 
-    // OPTIONAL: reset config to defaults on reset-room (comment out if you want keep config)
+    // keep current config, unless you want to restore defaults:
     // Object.assign(CFG, { ...DEFAULT_CFG });
 
     broadcastState();
     broadcastTop();
 
-    socket.emit("toast", { type: "good", message: "✅ Room reset (players cleared + avatars cleaned)" });
+    socket.emit("toast", {
+      type: "good",
+      message: "✅ Room reset (players cleared + avatars cleaned)",
+    });
   });
 
-  // ✅ NEW: Clear results (reset all scores to 0, keep room + players)
-  socket.on("admin_clear_results", () => {
-    if (!state.admins.has(socket.id)) return;
+  // GAMEPLAY ONLY -> operator allowed
+  socket.on("admin_clear_results", ({ adminKey } = {}) => {
+    const authed = ensureOperator(socket) || isOperatorKey(adminKey);
+    if (!authed) return;
+
+    if (!ensureOperator(socket) && isOperatorKey(adminKey)) {
+      if (!isAdminKey(adminKey)) state.operators.add(socket.id);
+      else state.admins.add(socket.id);
+    }
 
     resetAllScores();
 
-    // ✅ IMPORTANT: leave game-over phase so /screen unfreezes
     state.phase = "idle";
     state.matchId = null;
     state.round = 0;
@@ -157,6 +271,9 @@ export function attachAdminHandlers(io, socket, broadcastState, broadcastTop) {
     broadcastState();
     broadcastTop();
 
-    socket.emit("toast", { type: "good", message: "✅ Cleared results: all scores set to 0" });
+    socket.emit("toast", {
+      type: "good",
+      message: "✅ Cleared results: all scores set to 0",
+    });
   });
 }
