@@ -1,9 +1,6 @@
-// client/src/pages/PlayerPage.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchDepartments } from "../api/departmentsApi.js";
 import { useGameState } from "../store/useGameState.js";
-// FIX #1: Import getSocket() — window.__SOCKET__ was never set anywhere in the
-// app, so every socket.emit() and socket.on() in this file was a silent no-op.
 import { getSocket } from "../store/gameStore.js";
 import { msToSecCeil } from "../lib/time.js";
 
@@ -164,17 +161,11 @@ function preloadImages(urls = []) {
   );
 }
 
-// =========================================================
-// ✅ Web Audio API pop SFX — pre-decoded AudioBuffer
-//    Near-zero latency (<5ms), truly polyphonic, no pool limit
-//    Each .play() creates a tiny BufferSourceNode (cheap, GC'd automatically)
-// =========================================================
 function createPopAudio(url) {
   let ctx = null;
   let buffer = null;
   let loadPromise = null;
 
-  // Lazily create AudioContext (must happen after a user gesture on iOS)
   function getCtx() {
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
@@ -189,50 +180,38 @@ function createPopAudio(url) {
     buffer = await audioCtx.decodeAudioData(raw);
   }
 
-  // Call once on first user gesture — resumes context AND fetches the buffer
   function unlock() {
     const audioCtx = getCtx();
-    // Resume suspended context (required by iOS/Android autoplay policy)
     if (audioCtx.state === "suspended") {
       audioCtx.resume().catch(() => {});
     }
-    // Start loading buffer if not already
     if (!loadPromise) {
       loadPromise = load().catch(() => {});
     }
   }
 
-  // ✅ Fire-and-forget: creates a new BufferSourceNode each call (instant, <1ms overhead)
-  //    Multiple simultaneous fingers = multiple simultaneous nodes = true polyphony
   function play({ volume = 0.9, rate = 1.0 } = {}) {
-    if (!ctx || !buffer) return; // not loaded yet — silent fail, never blocks
+    if (!ctx || !buffer) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
 
     try {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.playbackRate.value = rate;
-
-      // Per-note gain for volume control
       const gain = ctx.createGain();
       gain.gain.value = volume;
-
       source.connect(gain);
       gain.connect(ctx.destination);
-      source.start(0); // schedule immediately — no latency
-    } catch {
-      // Silently swallow any edge-case errors (e.g. context closed)
-    }
+      source.start(0);
+    } catch {}
   }
 
   return { unlock, play };
 }
 
-/** ========= Change this to your audio file path in /public ========= */
 const POP_SFX_SRC = "/sfx/pop.mp3";
 const PLAYER_ID_KEY = "pop_player_id";
 
-/** Convert uploaded face to smaller dataUrl */
 async function fileToThumbDataUrl(file, max = 128, quality = 0.75) {
   const img = new Image();
   const url = URL.createObjectURL(file);
@@ -295,7 +274,6 @@ function CircleAvatar({ src, label = "Avatar", size = 36 }) {
   );
 }
 
-/** Fullscreen overlay for Popcat gameplay (pastel, no emoji) */
 function PopcatFullScreen({
   popTitle, score, canClick, onPop,
   imgClosed, imgOpen, phase, lobbyLeft, matchLeft, matchEndsAt,
@@ -309,8 +287,6 @@ function PopcatFullScreen({
   const holdingSpaceRef = useRef(false);
   const [imgLoaded, setImgLoaded] = useState(false);
 
-  // ✅ KEY FIX: Keep refs in sync with props so pointer handlers NEVER
-  //    capture stale values — critical for 3-5 simultaneous finger taps
   const canClickRef = useRef(canClick);
   const onPopRef = useRef(onPop);
   useEffect(() => { canClickRef.current = canClick; }, [canClick]);
@@ -321,23 +297,38 @@ function PopcatFullScreen({
   const [uiLift, setUiLift] = useState(() => Number(localStorage.getItem(UI_LIFT_KEY) || 0));
   useEffect(() => localStorage.setItem(UI_LIFT_KEY, String(uiLift)), [uiLift]);
 
-  // Block text selection & callouts while fullscreen is open
   useEffect(() => {
     const prev = {
       userSelect: document.body.style.userSelect,
       webkitUserSelect: document.body.style.webkitUserSelect,
       webkitTouchCallout: document.body.style.webkitTouchCallout,
       overscrollBehavior: document.body.style.overscrollBehavior,
+      touchAction: document.body.style.touchAction,
     };
     document.body.style.userSelect = "none";
     document.body.style.webkitUserSelect = "none";
     document.body.style.webkitTouchCallout = "none";
     document.body.style.overscrollBehavior = "none";
+    document.body.style.touchAction = "none";
+
     return () => {
       document.body.style.userSelect = prev.userSelect;
       document.body.style.webkitUserSelect = prev.webkitUserSelect;
       document.body.style.webkitTouchCallout = prev.webkitTouchCallout;
       document.body.style.overscrollBehavior = prev.overscrollBehavior;
+      document.body.style.touchAction = prev.touchAction;
+    };
+  }, []);
+
+  useEffect(() => {
+    const preventGesture = (e) => e.preventDefault();
+    document.addEventListener("gesturestart", preventGesture, { passive: false });
+    document.addEventListener("gesturechange", preventGesture, { passive: false });
+    document.addEventListener("gestureend", preventGesture, { passive: false });
+    return () => {
+      document.removeEventListener("gesturestart", preventGesture);
+      document.removeEventListener("gesturechange", preventGesture);
+      document.removeEventListener("gestureend", preventGesture);
     };
   }, []);
 
@@ -348,7 +339,6 @@ function PopcatFullScreen({
         if (holdingSpaceRef.current || e.repeat) return;
         holdingSpaceRef.current = true;
         setMouthOpen(true);
-        // ✅ Read from ref — no stale closure
         if (!canClickRef.current) return;
         onPopRef.current();
         return;
@@ -368,8 +358,7 @@ function PopcatFullScreen({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onExit]); // ✅ onPop/canClick intentionally excluded — refs handle them
+  }, [onExit]);
 
   const activeImg = mouthOpen ? (imgOpen || imgClosed) : imgClosed;
 
@@ -461,17 +450,11 @@ function PopcatFullScreen({
   const modeIcon =
     phase === "paused" ? <Icon name="pause" size={18} /> : <Icon name="timer" size={18} />;
 
-  // =========================================================
-  // ✅ POINTER HANDLERS — fully ref-based, zero React overhead
-  //    Reading canClickRef.current means all 5 fingers see the
-  //    same up-to-date value without waiting for a re-render.
-  // =========================================================
   const handlePointerDown = (e) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     activePtrsRef.current.add(e.pointerId);
     setMouthOpen(true);
-    // ✅ Read ref — never stale even with rapid multi-finger taps
     if (!canClickRef.current) return;
     onPopRef.current();
   };
@@ -493,14 +476,24 @@ function PopcatFullScreen({
       onSelectStart={(e) => e.preventDefault()}
       onContextMenu={(e) => e.preventDefault()}
       style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: PASTEL_BG, color: TXT, overflow: "hidden",
-        touchAction: "none", userSelect: "none",
-        WebkitUserSelect: "none", WebkitTouchCallout: "none",
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        width: "100vw",
+        height: "100dvh",
+        maxWidth: "100vw",
+        maxHeight: "100dvh",
+        background: PASTEL_BG,
+        color: TXT,
+        overflow: "hidden",
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
         WebkitTapHighlightColor: "transparent",
+        transform: "none",
       }}
     >
-      {/* subtle sparkly overlay */}
       <div aria-hidden style={{
         position: "absolute", inset: 0,
         background:
@@ -513,13 +506,11 @@ function PopcatFullScreen({
         opacity: 0.55, pointerEvents: "none",
       }} />
 
-      {/* TOP HUD */}
       <div style={{
         position: "absolute", left: 12, right: 12, top: 0, zIndex: 20,
         pointerEvents: "none",
         paddingTop: "calc(env(safe-area-inset-top, 0px) + 8px)",
       }}>
-        {/* Row 1 */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, pointerEvents: "auto" }}>
           <button
             onClick={onExit}
@@ -555,7 +546,6 @@ function PopcatFullScreen({
           </div>
         </div>
 
-        {/* Warn pill */}
         {warn && (
           <div style={{ marginTop: 10, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
             <div style={{
@@ -571,7 +561,6 @@ function PopcatFullScreen({
           </div>
         )}
 
-        {/* Row 2: Title + Score */}
         <div style={{ marginTop: 10, textAlign: "center", pointerEvents: "none" }}>
           <div style={{
             fontWeight: 1100, letterSpacing: 1.5, textTransform: "uppercase",
@@ -604,7 +593,6 @@ function PopcatFullScreen({
           ) : null}
         </div>
 
-        {/* Row 3: Leaderboard summary */}
         <div style={{ marginTop: 10, pointerEvents: "auto", display: "flex", justifyContent: "center" }}>
           <div style={{
             width: "min(980px, 100%)", borderRadius: 18, border: `1px solid ${GLASS_STROKE}`,
@@ -612,7 +600,6 @@ function PopcatFullScreen({
             padding: "10px 10px", boxShadow: SHADOW_SOFT,
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              {/* TOP 1 */}
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
                 padding: "8px 10px", borderRadius: 999,
@@ -635,7 +622,6 @@ function PopcatFullScreen({
                 <div style={{ fontWeight: 1100, fontSize: 12, color: TXT }}>{Number(sorted[0]?.score || 0)}</div>
               </div>
 
-              {/* MY RANK */}
               <div style={{
                 display: "flex", alignItems: "center", gap: 10,
                 padding: "8px 10px", borderRadius: 999,
@@ -660,9 +646,6 @@ function PopcatFullScreen({
         </div>
       </div>
 
-      {/* =====================================================
-          MAIN CLICK AREA
-      ===================================================== */}
       <div style={{
         position: "absolute", inset: 0,
         display: "grid", placeItems: "center",
@@ -672,14 +655,13 @@ function PopcatFullScreen({
         transform: uiLift ? `translateY(-${uiLift}px)` : undefined,
         transition: "transform 160ms ease",
       }}>
-        {/* Pop button — all pointer logic via stable refs, zero re-render cost per tap */}
         <div
           onContextMenu={(e) => e.preventDefault()}
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
           style={{
-            width: "min(94vw, 920px)", height: "min(70vh, 720px)",
+            width: "min(94vw, 920px)", height: "min(70dvh, 720px)",
             borderRadius: 28, border: "1px solid rgba(0,0,0,.12)",
             background: "rgb(2, 6, 23)",
             boxShadow: mouthOpen
@@ -746,7 +728,6 @@ function PopcatFullScreen({
           )}
         </div>
 
-        {/* UI lift control */}
         <div style={{ position: "absolute", right: 14, bottom: 14, zIndex: 8, pointerEvents: "auto" }}>
           <div style={{
             borderRadius: 999, border: `1px solid ${GLASS_STROKE}`,
@@ -766,7 +747,6 @@ function PopcatFullScreen({
         </div>
       </div>
 
-      {/* ENDED overlay */}
       {ended && (
         <div style={{
           position: "absolute", inset: 0, zIndex: 50, display: "grid", placeItems: "center",
@@ -814,8 +794,6 @@ function PopcatFullScreen({
 }
 
 export default function PlayerPage() {
-  // FIX #1: Use getSocket() — the singleton from gameStore.js.
-  // window.__SOCKET__ was never assigned, making all player socket calls no-ops.
   const socket = getSocket();
 
   const { connected, roomOpen, phase, cfg, lobbyEndsAt, matchEndsAt, event, warn, toast, topPlayers, topTeams } =
@@ -851,32 +829,19 @@ export default function PlayerPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [fs, setFs] = useState(false);
   const [fsPending, setFsPending] = useState(false);
-
-  const openFullscreen = async () => {
-    if (!joined) return;
-    setFsPending(true);
-    await preloadImages([mgrClosed, mgrOpen]);
-    setFsPending(false);
-    setFs(true);
-  };
+  const fsRootRef = useRef(null);
 
   const reloadDepartments = async () => {
     const list = await fetchDepartments().catch(() => []);
     setDepartments(Array.isArray(list) ? list : []);
   };
 
-  useEffect(() => { reloadDepartments(); }, []); // eslint-disable-line
+  useEffect(() => { reloadDepartments(); }, []);
 
-  // =========================================================
-  // ✅ Web Audio API — create once, never recreated
-  // =========================================================
   const popAudioRef = useRef(null);
 
   useEffect(() => {
     popAudioRef.current = createPopAudio(POP_SFX_SRC);
-    // ✅ Attach a passive one-time gesture listener so the AudioContext
-    //    is unlocked+loaded as early as possible, BEFORE the game starts.
-    //    This runs on the first touch/click anywhere on the page.
     const earlyUnlock = () => {
       popAudioRef.current?.unlock?.();
       window.removeEventListener("pointerdown", earlyUnlock, { capture: true });
@@ -890,18 +855,14 @@ export default function PlayerPage() {
     };
   }, []);
 
-  // ✅ playPopSfx: pure function, zero React involvement
-  //    Safe to call from pointer events without re-render risk
   const playPopSfx = () => {
     const rate = 0.95 + Math.random() * 0.12;
     popAudioRef.current?.play?.({ volume: 0.9, rate });
   };
 
-  // ✅ socketRef keeps the socket stable in the click hot-path
   const socketRef = useRef(socket);
   useEffect(() => { socketRef.current = socket; }, [socket]);
 
-  // ✅ canClickRef — read in clickAction without stale closure
   const canClick = joined && phase === "playing";
   const canClickRef = useRef(canClick);
   useEffect(() => { canClickRef.current = canClick; }, [canClick]);
@@ -911,7 +872,6 @@ export default function PlayerPage() {
     try { socket.emit("join_role", { role: "player" }); } catch {}
   }, [socket]);
 
-  // Rejoin when player comes back to tab
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
@@ -998,6 +958,39 @@ export default function PlayerPage() {
     };
   }, [socket]);
 
+  useEffect(() => {
+    const onFsChange = () => {
+      if (!document.fullscreenElement) {
+        setFs(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  useEffect(() => {
+    if (!fs) return;
+
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyTouchAction = document.body.style.touchAction;
+    const prevHtmlTouchAction = document.documentElement.style.touchAction;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    document.documentElement.style.touchAction = "none";
+
+    window.scrollTo(0, 0);
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.body.style.touchAction = prevBodyTouchAction;
+      document.documentElement.style.touchAction = prevHtmlTouchAction;
+    };
+  }, [fs]);
+
   const filteredDepts = useMemo(() => {
     const q = deptQuery.trim().toLowerCase();
     if (!q) return departments;
@@ -1020,12 +1013,8 @@ export default function PlayerPage() {
     socket?.emit("join", { playerId: pid, name: safeName, departmentKey, avatarUrl });
   };
 
-  // ✅ clickAction: reads from refs only — no closures over React state
-  //    Audio fires first (Web Audio = <5ms), socket emit second — both synchronous
   const clickAction = () => {
-    // Sound first — Web Audio API fires in <5ms, never blocks socket
     playPopSfx();
-    // Socket emit — synchronous, no await
     socketRef.current?.emit("action_click");
   };
 
@@ -1087,265 +1076,326 @@ export default function PlayerPage() {
     urls.forEach((src) => { const img = new Image(); img.src = src; });
   }, [mgrClosed, mgrOpen]);
 
-  if (fs && joined) {
-    return (
-      <PopcatFullScreen
-        popTitle={popTitle}
-        score={myScore}
-        canClick={canClick}
-        onPop={clickAction}
-        imgClosed={mgrClosed}
-        imgOpen={mgrOpen}
-        phase={phase}
-        lobbyLeft={lobbyLeft}
-        matchLeft={matchLeft}
-        matchEndsAt={matchEndsAt}
-        modeLabel={modeLabel}
-        eventActive={!!event?.active}
-        eventLeft={eventLeft}
-        eventType={event?.type || ""}
-        warn={warn}
-        topPlayers={topPlayers || []}
-        myId={myIdRef.current}
-        myName={name.trim() || "You"}
-        myAvatarUrl={avatarUrl}
-        onExit={() => setFs(false)}
-      />
-    );
-  }
+  const closeFullscreen = async () => {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {}
+    }
+    setFs(false);
+  };
+
+  const openFullscreen = async () => {
+    if (!joined) return;
+
+    setFsPending(true);
+    try {
+      await preloadImages([mgrClosed, mgrOpen]);
+
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      setFs(true);
+
+      requestAnimationFrame(async () => {
+        const el = fsRootRef.current;
+        if (!el) {
+          setFsPending(false);
+          return;
+        }
+
+        try {
+          if (el.requestFullscreen) {
+            await el.requestFullscreen({ navigationUI: "hide" });
+          }
+        } catch {
+          // fallback: still show overlay even if browser fullscreen is denied
+        } finally {
+          setFsPending(false);
+        }
+      });
+    } catch {
+      setFsPending(false);
+      setFs(true);
+    }
+  };
 
   return (
-    <div style={{ minHeight: "100vh", background: PASTEL_BG, color: TXT, padding: 22 }}>
-      {!connected && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 99999,
-          background: "rgba(15,23,42,.93)", color: "#fff",
-          padding: "10px 16px", textAlign: "center",
-          fontWeight: 1000, fontSize: 13, letterSpacing: 0.3,
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-        }}>
-          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 999, background: "rgba(251,191,36,1)", boxShadow: "0 0 0 0 rgba(251,191,36,.6)" }} />
-          Reconnecting to server… please wait
+    <>
+      {fs && joined && (
+        <div
+          ref={fsRootRef}
+          style={{
+            position: "fixed",
+            inset: 0,
+            width: "100vw",
+            height: "100dvh",
+            maxWidth: "100vw",
+            maxHeight: "100dvh",
+            overflow: "hidden",
+            zIndex: 999999,
+            background: "#000",
+            transform: "none",
+          }}
+        >
+          <PopcatFullScreen
+            popTitle={popTitle}
+            score={myScore}
+            canClick={canClick}
+            onPop={clickAction}
+            imgClosed={mgrClosed}
+            imgOpen={mgrOpen}
+            phase={phase}
+            lobbyLeft={lobbyLeft}
+            matchLeft={matchLeft}
+            matchEndsAt={matchEndsAt}
+            modeLabel={modeLabel}
+            eventActive={!!event?.active}
+            eventLeft={eventLeft}
+            eventType={event?.type || ""}
+            warn={warn}
+            topPlayers={topPlayers || []}
+            myId={myIdRef.current}
+            myName={name.trim() || "You"}
+            myAvatarUrl={avatarUrl}
+            onExit={closeFullscreen}
+          />
         </div>
       )}
 
-      {warn && (
-        <div style={{ position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 9999, pointerEvents: "none" }}>
+      <div style={{ minHeight: "100dvh", background: PASTEL_BG, color: TXT, padding: 22 }}>
+        {!connected && (
           <div style={{
-            borderRadius: 999, border: "1px solid rgba(251,191,36,.30)", background: WARN_BG,
-            backdropFilter: "blur(12px)", boxShadow: SHADOW_SOFT,
-            padding: "10px 14px", fontWeight: 1000, color: TXT,
-            display: "inline-flex", alignItems: "center", gap: 10,
+            position: "fixed", top: 0, left: 0, right: 0, zIndex: 99999,
+            background: "rgba(15,23,42,.93)", color: "#fff",
+            padding: "10px 16px", textAlign: "center",
+            fontWeight: 1000, fontSize: 13, letterSpacing: 0.3,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
           }}>
-            <span style={{ color: "rgba(245,158,11,.95)" }}><Icon name="warning" size={18} /></span>
-            Event incoming in <b style={{ color: TXT }}>{warn.left}</b>
+            <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 999, background: "rgba(251,191,36,1)", boxShadow: "0 0 0 0 rgba(251,191,36,.6)" }} />
+            Reconnecting to server… please wait
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="container">
-        <TopBar
-          title="Pop Manager"
-          subtitle=""
-          right={<TopPills roomOpen={roomOpen} phase={null} mode={cfg?.mode || "SOLO"} />}
-        />
+        {warn && (
+          <div style={{ position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 9999, pointerEvents: "none" }}>
+            <div style={{
+              borderRadius: 999, border: "1px solid rgba(251,191,36,.30)", background: WARN_BG,
+              backdropFilter: "blur(12px)", boxShadow: SHADOW_SOFT,
+              padding: "10px 14px", fontWeight: 1000, color: TXT,
+              display: "inline-flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ color: "rgba(245,158,11,.95)" }}><Icon name="warning" size={18} /></span>
+              Event incoming in <b style={{ color: TXT }}>{warn.left}</b>
+            </div>
+          </div>
+        )}
 
-        <div className="grid2">
-          <Card big>
-            {!joined ? (
-              <>
-                <div style={{ fontSize: 18, fontWeight: 1100, color: TXT }}>Join Game</div>
+        <div className="container">
+          <TopBar
+            title="Pop Manager"
+            subtitle=""
+            right={<TopPills roomOpen={roomOpen} phase={null} mode={cfg?.mode || "SOLO"} />}
+          />
 
-                {!roomOpen && (
-                  <div style={{
-                    marginTop: 12, padding: "10px 12px", borderRadius: 16,
-                    border: `1px solid ${DANGER_RING}`, background: "rgba(255,255,255,.65)",
-                    fontWeight: 1000, color: TXT,
-                    display: "flex", alignItems: "center", gap: 10, boxShadow: SHADOW_SOFT,
-                  }}>
-                    <span style={{ color: "rgba(239,68,68,.95)" }}><Icon name="lock" size={18} /></span>
-                    Room is closed — please wait for admin
-                  </div>
-                )}
+          <div className="grid2">
+            <Card big>
+              {!joined ? (
+                <>
+                  <div style={{ fontSize: 18, fontWeight: 1100, color: TXT }}>Join Game</div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
-                  <CircleAvatar src={avatarUrl} label="Avatar" size={46} />
-                  <label style={{
-                    borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
-                    background: "rgba(255,255,255,.70)", color: TXT,
-                    padding: "10px 12px", cursor: "pointer", fontWeight: 1000,
-                    display: "inline-flex", alignItems: "center", gap: 10, boxShadow: SHADOW_SOFT,
-                  }}>
-                    <Icon name="camera" size={18} />
-                    Upload photo
-                    <input type="file" accept="image/*" style={{ display: "none" }}
-                      onChange={async (e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        setAvatarErr("");
-                        try {
-                          const dataUrl = await fileToThumbDataUrl(f, 128, 0.75);
-                          setAvatarUrl(dataUrl);
-                        } catch {
-                          setAvatarErr("Upload failed");
-                          setAvatarUrl("");
-                        }
+                  {!roomOpen && (
+                    <div style={{
+                      marginTop: 12, padding: "10px 12px", borderRadius: 16,
+                      border: `1px solid ${DANGER_RING}`, background: "rgba(255,255,255,.65)",
+                      fontWeight: 1000, color: TXT,
+                      display: "flex", alignItems: "center", gap: 10, boxShadow: SHADOW_SOFT,
+                    }}>
+                      <span style={{ color: "rgba(239,68,68,.95)" }}><Icon name="lock" size={18} /></span>
+                      Room is closed — please wait for admin
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
+                    <CircleAvatar src={avatarUrl} label="Avatar" size={46} />
+                    <label style={{
+                      borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
+                      background: "rgba(255,255,255,.70)", color: TXT,
+                      padding: "10px 12px", cursor: "pointer", fontWeight: 1000,
+                      display: "inline-flex", alignItems: "center", gap: 10, boxShadow: SHADOW_SOFT,
+                    }}>
+                      <Icon name="camera" size={18} />
+                      Upload photo
+                      <input type="file" accept="image/*" style={{ display: "none" }}
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          setAvatarErr("");
+                          try {
+                            const dataUrl = await fileToThumbDataUrl(f, 128, 0.75);
+                            setAvatarUrl(dataUrl);
+                          } catch {
+                            setAvatarErr("Upload failed");
+                            setAvatarUrl("");
+                          }
+                        }}
+                      />
+                    </label>
+                    <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name"
+                      style={{
+                        padding: "10px 12px", borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
+                        background: "rgba(255,255,255,.70)", color: TXT, outline: "none",
+                        minWidth: 220, boxShadow: SHADOW_SOFT,
                       }}
                     />
-                  </label>
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name"
-                    style={{
-                      padding: "10px 12px", borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
-                      background: "rgba(255,255,255,.70)", color: TXT, outline: "none",
-                      minWidth: 220, boxShadow: SHADOW_SOFT,
-                    }}
-                  />
-                  <button onClick={join} disabled={joinDisabled} style={{
-                    border: 0, background: PRIMARY_GRAD, color: "white",
-                    padding: "10px 12px", borderRadius: 16,
-                    cursor: joinDisabled ? "not-allowed" : "pointer",
-                    fontWeight: 1100, opacity: joinDisabled ? 0.55 : 1, boxShadow: SHADOW_SOFT,
-                  }}>
-                    Join
-                  </button>
-                  <button onClick={reloadDepartments} style={{
-                    borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
-                    background: "rgba(255,255,255,.70)", color: TXT,
-                    padding: "10px 12px", cursor: "pointer", fontWeight: 1000,
-                    boxShadow: SHADOW_SOFT, display: "inline-flex", alignItems: "center", gap: 10,
-                  }} title="Reload departments">
-                    <Icon name="refresh" size={18} />
-                    Refresh
-                  </button>
-                </div>
-
-                {!avatarUrl && (
-                  <div style={{ marginTop: 10, color: "rgba(239,68,68,.92)", fontWeight: 1000, display: "flex", gap: 10, alignItems: "center" }}>
-                    <Icon name="warning" size={18} />
-                    Please upload your photo before joining.
+                    <button onClick={join} disabled={joinDisabled} style={{
+                      border: 0, background: PRIMARY_GRAD, color: "white",
+                      padding: "10px 12px", borderRadius: 16,
+                      cursor: joinDisabled ? "not-allowed" : "pointer",
+                      fontWeight: 1100, opacity: joinDisabled ? 0.55 : 1, boxShadow: SHADOW_SOFT,
+                    }}>
+                      Join
+                    </button>
+                    <button onClick={reloadDepartments} style={{
+                      borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
+                      background: "rgba(255,255,255,.70)", color: TXT,
+                      padding: "10px 12px", cursor: "pointer", fontWeight: 1000,
+                      boxShadow: SHADOW_SOFT, display: "inline-flex", alignItems: "center", gap: 10,
+                    }} title="Reload departments">
+                      <Icon name="refresh" size={18} />
+                      Refresh
+                    </button>
                   </div>
-                )}
-                {avatarErr ? <div style={{ marginTop: 6, color: "rgba(239,68,68,.92)", fontWeight: 900 }}>{avatarErr}</div> : null}
-                {deptErr ? (
-                  <div style={{ marginTop: 6, color: "rgba(239,68,68,.92)", fontWeight: 1000, display: "flex", gap: 10, alignItems: "center" }}>
-                    <Icon name="warning" size={18} />
-                    {deptErr}
-                  </div>
-                ) : null}
 
-                <CardInner style={{ marginTop: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
-                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>Search Department</div>
-                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>
-                      Selected: <b style={{ color: departmentKey ? TXT : MUTED }}>
-                        {departmentKey ? selectedDeptName : "— Please select —"}
-                      </b>
+                  {!avatarUrl && (
+                    <div style={{ marginTop: 10, color: "rgba(239,68,68,.92)", fontWeight: 1000, display: "flex", gap: 10, alignItems: "center" }}>
+                      <Icon name="warning" size={18} />
+                      Please upload your photo before joining.
                     </div>
-                  </div>
-                  <input value={deptQuery} onChange={(e) => setDeptQuery(e.target.value)}
-                    placeholder="Search... (id / name / manager)"
-                    style={{
-                      width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 16,
-                      border: `1px solid ${GLASS_STROKE}`, background: "rgba(255,255,255,.70)",
-                      color: TXT, outline: "none", boxShadow: SHADOW_SOFT,
-                    }}
-                  />
-                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
-                    {filteredDepts.map((d) => {
-                      const selected = departmentKey === d.id;
-                      return (
-                        <button key={d.id} onClick={() => { setDepartmentKey(d.id); setDeptErr(""); }}
-                          style={{
-                            borderRadius: 16,
-                            border: `1px solid ${selected ? "rgba(99,102,241,.35)" : GLASS_STROKE}`,
-                            background: selected ? PRIMARY_GRAD_SOFT : "rgba(255,255,255,.65)",
-                            padding: "10px 12px", cursor: "pointer", textAlign: "left",
-                            color: TXT, fontWeight: 1000, boxShadow: SHADOW_SOFT,
-                          }}>
-                          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                            <b style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</b>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </CardInner>
-              </>
-            ) : (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>You</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <CircleAvatar src={avatarUrl} label={name.trim() || "Player"} size={34} />
-                      <div style={{ fontSize: 18, fontWeight: 1100, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", color: TXT }}>
-                        <span>{name.trim() || "Player"}</span>
-                        <Pill style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                          <span>Department: {selectedDeptName}</span>
-                        </Pill>
+                  )}
+                  {avatarErr ? <div style={{ marginTop: 6, color: "rgba(239,68,68,.92)", fontWeight: 900 }}>{avatarErr}</div> : null}
+                  {deptErr ? (
+                    <div style={{ marginTop: 6, color: "rgba(239,68,68,.92)", fontWeight: 1000, display: "flex", gap: 10, alignItems: "center" }}>
+                      <Icon name="warning" size={18} />
+                      {deptErr}
+                    </div>
+                  ) : null}
+
+                  <CardInner style={{ marginTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+                      <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>Search Department</div>
+                      <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>
+                        Selected: <b style={{ color: departmentKey ? TXT : MUTED }}>
+                          {departmentKey ? selectedDeptName : "— Please select —"}
+                        </b>
                       </div>
                     </div>
-                    <div style={{ color: MUTED, fontSize: 14, fontWeight: 900 }}>
-                      Score: <b style={{ color: TXT }}>{myScore}</b>
+                    <input value={deptQuery} onChange={(e) => setDeptQuery(e.target.value)}
+                      placeholder="Search... (id / name / manager)"
+                      style={{
+                        width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 16,
+                        border: `1px solid ${GLASS_STROKE}`, background: "rgba(255,255,255,.70)",
+                        color: TXT, outline: "none", boxShadow: SHADOW_SOFT,
+                      }}
+                    />
+                    <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+                      {filteredDepts.map((d) => {
+                        const selected = departmentKey === d.id;
+                        return (
+                          <button key={d.id} onClick={() => { setDepartmentKey(d.id); setDeptErr(""); }}
+                            style={{
+                              borderRadius: 16,
+                              border: `1px solid ${selected ? "rgba(99,102,241,.35)" : GLASS_STROKE}`,
+                              background: selected ? PRIMARY_GRAD_SOFT : "rgba(255,255,255,.65)",
+                              padding: "10px 12px", cursor: "pointer", textAlign: "left",
+                              color: TXT, fontWeight: 1000, boxShadow: SHADOW_SOFT,
+                            }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                              <b style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</b>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <button onClick={deleteAccount} style={{
-                      marginTop: 10, borderRadius: 16, border: `1px solid ${DANGER_RING}`,
-                      background: DANGER_BG, color: TXT, padding: "8px 12px",
-                      fontWeight: 1000, cursor: "pointer", boxShadow: SHADOW_SOFT,
-                      display: "inline-flex", alignItems: "center", gap: 10,
-                    }}>
-                      <Icon name="trash" size={18} />
-                      Delete Account
-                    </button>
+                  </CardInner>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>You</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <CircleAvatar src={avatarUrl} label={name.trim() || "Player"} size={34} />
+                        <div style={{ fontSize: 18, fontWeight: 1100, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", color: TXT }}>
+                          <span>{name.trim() || "Player"}</span>
+                          <Pill style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                            <span>Department: {selectedDeptName}</span>
+                          </Pill>
+                        </div>
+                      </div>
+                      <div style={{ color: MUTED, fontSize: 14, fontWeight: 900 }}>
+                        Score: <b style={{ color: TXT }}>{myScore}</b>
+                      </div>
+                      <button onClick={deleteAccount} style={{
+                        marginTop: 10, borderRadius: 16, border: `1px solid ${DANGER_RING}`,
+                        background: DANGER_BG, color: TXT, padding: "8px 12px",
+                        fontWeight: 1000, cursor: "pointer", boxShadow: SHADOW_SOFT,
+                        display: "inline-flex", alignItems: "center", gap: 10,
+                      }}>
+                        <Icon name="trash" size={18} />
+                        Delete Account
+                      </button>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <button onClick={openFullscreen} disabled={fsPending} style={{
+                        marginTop: 6, borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
+                        background: PRIMARY_GRAD, color: "white",
+                        padding: "10px 12px", fontWeight: 1100,
+                        cursor: fsPending ? "not-allowed" : "pointer",
+                        boxShadow: SHADOW_SOFT, display: "inline-flex", alignItems: "center", gap: 10,
+                      }}>
+                        <Icon name="play" size={18} />
+                        Fullscreen
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
+
+                  <TeamPanel
+                    enabled={cfg?.mode === "TEAM"}
+                    maxTeamSize={cfg?.maxTeamSize || 5}
+                    myTeam={myTeam}
+                    isOwner={isOwner}
+                    onCreate={createTeam}
+                    onJoin={joinTeam}
+                    onLeave={leaveTeam}
+                    onRename={renameTeam}
+                    onDissolve={dissolveTeam}
+                  />
+
+                  <CardInner style={{ marginTop: 12 }}>
                     <button onClick={openFullscreen} disabled={fsPending} style={{
-                      marginTop: 6, borderRadius: 16, border: `1px solid ${GLASS_STROKE}`,
-                      background: PRIMARY_GRAD, color: "white",
-                      padding: "10px 12px", fontWeight: 1100,
-                      cursor: fsPending ? "not-allowed" : "pointer",
-                      boxShadow: SHADOW_SOFT, display: "inline-flex", alignItems: "center", gap: 10,
+                      width: "100%", borderRadius: 18, border: `1px solid ${GLASS_STROKE}`,
+                      background: PRIMARY_GRAD, padding: 14, fontWeight: 1100, color: "white",
+                      cursor: fsPending ? "not-allowed" : "pointer", boxShadow: SHADOW_SOFT,
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 10,
                     }}>
                       <Icon name="play" size={18} />
-                      Fullscreen
+                      Open Fullscreen
                     </button>
-                  </div>
-                </div>
+                  </CardInner>
 
-                <TeamPanel
-                  enabled={cfg?.mode === "TEAM"}
-                  maxTeamSize={cfg?.maxTeamSize || 5}
-                  myTeam={myTeam}
-                  isOwner={isOwner}
-                  onCreate={createTeam}
-                  onJoin={joinTeam}
-                  onLeave={leaveTeam}
-                  onRename={renameTeam}
-                  onDissolve={dissolveTeam}
-                />
+                  <Toast toast={toast} />
+                </>
+              )}
+            </Card>
 
-                <CardInner style={{ marginTop: 12 }}>
-                  <button onClick={openFullscreen} disabled={fsPending} style={{
-                    width: "100%", borderRadius: 18, border: `1px solid ${GLASS_STROKE}`,
-                    background: PRIMARY_GRAD, padding: 14, fontWeight: 1100, color: "white",
-                    cursor: fsPending ? "not-allowed" : "pointer", boxShadow: SHADOW_SOFT,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 10,
-                  }}>
-                    <Icon name="play" size={18} />
-                    Open Fullscreen
-                  </button>
-                </CardInner>
-
-                <Toast toast={toast} />
-              </>
-            )}
-          </Card>
-
-          <Card>
-            <Leaderboard mode={cfg?.mode || "SOLO"} topPlayers={topPlayers || []} topTeams={topTeams || []} />
-          </Card>
+            <Card>
+              <Leaderboard mode={cfg?.mode || "SOLO"} topPlayers={topPlayers || []} topTeams={topTeams || []} />
+            </Card>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
