@@ -19,7 +19,7 @@ const DEPTS_PATH = path.join(process.cwd(), "departments.json");
 // ===== Multer (memory) =====
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 3 * 1024 * 1024 }, // 3MB
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB // 3MB
   fileFilter: (_req, file, cb) => {
     const allowed = [
       "image/jpeg",
