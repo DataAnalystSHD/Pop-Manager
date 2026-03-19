@@ -1,0 +1,1089 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { getSocket } from "../store/gameStore.js";
+import { useGameState } from "../store/useGameState.js";
+import { msToSecCeil } from "../lib/time.js";
+
+import Card, { CardInner } from "../components/Card.jsx";
+import TopBar, { TopPills } from "../components/TopBar.jsx";
+import Toast from "../components/Toast.jsx";
+import Leaderboard from "../components/Leaderboard.jsx";
+
+/**
+ * =========================================================
+ * Operator Console (Gameplay only)
+ * ---------------------------------------------------------
+ * This page is intentionally SAFE:
+ * - no department CRUD
+ * - no manager photo upload
+ * - no data-management actions
+ * - only live game operation
+ *
+ * IMPORTANT:
+ * If your existing AdminPage uses different socket event names,
+ * only update the OP_EVENTS map below.
+ * =========================================================
+ */
+
+const OPERATOR_KEY_STORAGE = "pop_operator_key";
+
+/**
+ * Change these ONLY if your current backend/admin socket event names differ.
+ * Try to match the exact emits from your current AdminPage.
+ */
+const OP_EVENTS = {
+  openRoom: "admin_room_toggle",
+  closeRoom: "admin_room_toggle",
+  startGame: "admin_start",
+  pauseGame: "admin_pause_toggle",
+  resumeGame: "admin_pause_toggle",
+  endGame: "admin_end",
+  clearResults: "admin_clear_results",
+  resetRoom: "admin_reset_room",
+  applySettings: "admin_config",
+};
+
+const PASTEL_BG =
+  "radial-gradient(900px 600px at 15% 5%, rgba(255,182,193,.55), transparent 60%)," +
+  "radial-gradient(850px 540px at 85% 10%, rgba(173,216,230,.55), transparent 58%)," +
+  "radial-gradient(900px 600px at 50% 110%, rgba(221,160,221,.35), transparent 62%)," +
+  "linear-gradient(180deg, rgba(255,255,255,1), rgba(255,250,252,.88))";
+
+const GLASS_STROKE = "rgba(148,163,184,.22)";
+const SHADOW_SOFT = "0 30px 100px -60px rgba(15,23,42,.35)";
+const TXT = "rgba(15,23,42,.92)";
+const MUTED = "rgba(15,23,42,.62)";
+const PRIMARY_GRAD =
+  "linear-gradient(135deg, rgba(99,102,241,.92), rgba(236,72,153,.75))";
+const PRIMARY_GRAD_SOFT =
+  "linear-gradient(135deg, rgba(99,102,241,.20), rgba(236,72,153,.16))";
+const SUCCESS_GRAD =
+  "linear-gradient(135deg, rgba(22,163,74,.95), rgba(74,222,128,.82))";
+const WARNING_GRAD =
+  "linear-gradient(135deg, rgba(245,158,11,.95), rgba(251,191,36,.82))";
+const DANGER_GRAD =
+  "linear-gradient(135deg, rgba(239,68,68,.96), rgba(244,114,182,.84))";
+const SOFT_BG = "rgba(255,255,255,.68)";
+const WARN_BG =
+  "linear-gradient(180deg, rgba(251,191,36,.18), rgba(255,255,255,.55))";
+const DANGER_RING = "rgba(239,68,68,.35)";
+const SUCCESS_RING = "rgba(22,163,74,.32)";
+const WARNING_RING = "rgba(245,158,11,.30)";
+
+function Icon({ name, size = 18, style = {}, className = "" }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    xmlns: "http://www.w3.org/2000/svg",
+    style: { display: "block", ...style },
+    className,
+  };
+
+  switch (name) {
+    case "play":
+      return (
+        <svg {...common}>
+          <path d="M9 7l10 5-10 5V7z" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+        </svg>
+      );
+    case "pause":
+      return (
+        <svg {...common}>
+          <path d="M8 5v14M16 5v14" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "stop":
+      return (
+        <svg {...common}>
+          <rect x="6" y="6" width="12" height="12" rx="2.5" stroke="currentColor" strokeWidth="2.2" />
+        </svg>
+      );
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M20 6v6h-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 18v-6h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M20 12a8 8 0 00-14.5-4.5L4 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 12a8 8 0 0014.5 4.5L20 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "doorOpen":
+      return (
+        <svg {...common}>
+          <path d="M5 21h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M8 21V5.5A1.5 1.5 0 019.5 4h7A1.5 1.5 0 0118 5.5V21" stroke="currentColor" strokeWidth="2.2" />
+          <path d="M8 12h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+        </svg>
+      );
+    case "doorClosed":
+      return (
+        <svg {...common}>
+          <path d="M6 21V5.5A1.5 1.5 0 017.5 4h9A1.5 1.5 0 0118 5.5V21" stroke="currentColor" strokeWidth="2.2" />
+          <path d="M13.5 12h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <path d="M12 8.5A3.5 3.5 0 1112 15.5 3.5 3.5 0 0112 8.5z" stroke="currentColor" strokeWidth="2.2" />
+          <path d="M19.4 15a1 1 0 00.2 1.1l.1.1a2 2 0 010 2.8 2 2 0 01-2.8 0l-.1-.1a1 1 0 00-1.1-.2 1 1 0 00-.6.9V20a2 2 0 01-4 0v-.1a1 1 0 00-.6-.9 1 1 0 00-1.1.2l-.1.1a2 2 0 01-2.8 0 2 2 0 010-2.8l.1-.1a1 1 0 00.2-1.1 1 1 0 00-.9-.6H4a2 2 0 010-4h.1a1 1 0 00.9-.6 1 1 0 00-.2-1.1l-.1-.1a2 2 0 010-2.8 2 2 0 012.8 0l.1.1a1 1 0 001.1.2 1 1 0 00.6-.9V4a2 2 0 014 0v.1a1 1 0 00.6.9 1 1 0 001.1-.2l.1-.1a2 2 0 012.8 0 2 2 0 010 2.8l-.1.1a1 1 0 00-.2 1.1 1 1 0 00.9.6H20a2 2 0 010 4h-.1a1 1 0 00-.9.6z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        </svg>
+      );
+    case "warning":
+      return (
+        <svg {...common}>
+          <path d="M12 3l10 18H2L12 3z" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+          <path d="M12 9v5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M12 17h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      );
+    case "screen":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="17" height="12" rx="2.5" stroke="currentColor" strokeWidth="2.2" />
+          <path d="M8 20h8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M12 16.5V20" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+        </svg>
+      );
+    case "user":
+      return (
+        <svg {...common}>
+          <path d="M12 12a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="2.2" />
+          <path d="M4 21a8 8 0 0116 0" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <path d="M12 8v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12 22a10 10 0 100-20 10 10 0 000 20z" stroke="currentColor" strokeWidth="2.2" />
+        </svg>
+      );
+    case "sparkle":
+      return (
+        <svg {...common}>
+          <path d="M12 2l1.4 5.1L18 9l-4.6 1.9L12 16l-1.4-5.1L6 9l4.6-1.9L12 2z" stroke="currentColor" strokeWidth="2.0" strokeLinejoin="round" />
+          <path d="M4 14l.7 2.6L7 18l-2.3.4L4 21l-.7-2.6L1 18l2.3-.4L4 14z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+function StatusPill({ label, value, tone = "default" }) {
+  const map = {
+    success: {
+      bg: "linear-gradient(180deg, rgba(22,163,74,.14), rgba(255,255,255,.62))",
+      border: "rgba(22,163,74,.22)",
+    },
+    warning: {
+      bg: "linear-gradient(180deg, rgba(245,158,11,.14), rgba(255,255,255,.62))",
+      border: "rgba(245,158,11,.22)",
+    },
+    danger: {
+      bg: "linear-gradient(180deg, rgba(239,68,68,.12), rgba(255,255,255,.62))",
+      border: "rgba(239,68,68,.22)",
+    },
+    default: {
+      bg: "rgba(255,255,255,.74)",
+      border: GLASS_STROKE,
+    },
+  };
+  const t = map[tone] || map.default;
+
+  return (
+    <div
+      style={{
+        borderRadius: 999,
+        border: `1px solid ${t.border}`,
+        background: t.bg,
+        boxShadow: SHADOW_SOFT,
+        padding: "10px 14px",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        fontWeight: 1000,
+        color: TXT,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ color: MUTED, fontWeight: 900 }}>{label}:</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function ActionButton({
+  label,
+  sublabel,
+  icon,
+  tone = "primary",
+  onClick,
+  disabled = false,
+}) {
+  const tones = {
+    primary: {
+      bg: PRIMARY_GRAD,
+      color: "#fff",
+      border: "transparent",
+    },
+    success: {
+      bg: SUCCESS_GRAD,
+      color: "#fff",
+      border: "transparent",
+    },
+    warning: {
+      bg: WARNING_GRAD,
+      color: "#fff",
+      border: "transparent",
+    },
+    danger: {
+      bg: DANGER_GRAD,
+      color: "#fff",
+      border: "transparent",
+    },
+    ghost: {
+      bg: SOFT_BG,
+      color: TXT,
+      border: GLASS_STROKE,
+    },
+  };
+
+  const t = tones[tone] || tones.primary;
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: "100%",
+        borderRadius: 20,
+        border: `1px solid ${t.border}`,
+        background: t.bg,
+        color: t.color,
+        padding: "14px 14px",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.52 : 1,
+        boxShadow: SHADOW_SOFT,
+        textAlign: "left",
+        display: "grid",
+        gap: 4,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 1100, fontSize: 16 }}>
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.35, opacity: t.tone === "ghost" ? 0.8 : 0.95, fontWeight: 800 }}>
+        {sublabel}
+      </div>
+    </button>
+  );
+}
+
+function InputField({ label, value, onChange, type = "text", min, max, placeholder }) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>{label}</div>
+      <input
+        type={type}
+        value={value}
+        min={min}
+        max={max}
+        placeholder={placeholder}
+        onChange={onChange}
+        style={{
+          width: "100%",
+          padding: "11px 12px",
+          borderRadius: 16,
+          border: `1px solid ${GLASS_STROKE}`,
+          background: "rgba(255,255,255,.74)",
+          color: TXT,
+          outline: "none",
+          boxShadow: SHADOW_SOFT,
+          fontWeight: 900,
+        }}
+      />
+    </label>
+  );
+}
+
+function ConfirmStrip({ title, desc, confirmLabel, onConfirm, onCancel, tone = "danger" }) {
+  const toneMap = {
+    danger: {
+      bg: "linear-gradient(180deg, rgba(239,68,68,.12), rgba(255,255,255,.7))",
+      border: DANGER_RING,
+      btn: DANGER_GRAD,
+    },
+    warning: {
+      bg: "linear-gradient(180deg, rgba(245,158,11,.12), rgba(255,255,255,.7))",
+      border: WARNING_RING,
+      btn: WARNING_GRAD,
+    },
+  };
+
+  const t = toneMap[tone] || toneMap.danger;
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        borderRadius: 18,
+        border: `1px solid ${t.border}`,
+        background: t.bg,
+        boxShadow: SHADOW_SOFT,
+        padding: 14,
+      }}
+    >
+      <div style={{ fontWeight: 1100, color: TXT }}>{title}</div>
+      <div style={{ marginTop: 4, color: MUTED, fontWeight: 800, lineHeight: 1.45 }}>{desc}</div>
+      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          onClick={onConfirm}
+          style={{
+            borderRadius: 14,
+            border: "0",
+            background: t.btn,
+            color: "#fff",
+            padding: "10px 14px",
+            fontWeight: 1100,
+            cursor: "pointer",
+            boxShadow: SHADOW_SOFT,
+          }}
+        >
+          {confirmLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            borderRadius: 14,
+            border: `1px solid ${GLASS_STROKE}`,
+            background: "rgba(255,255,255,.75)",
+            color: TXT,
+            padding: "10px 14px",
+            fontWeight: 1000,
+            cursor: "pointer",
+            boxShadow: SHADOW_SOFT,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FlowGuideCard() {
+  const steps = [
+    "1) Apply Settings before the round starts",
+    "2) Open Room to let players join",
+    "3) Watch player count and confirm everyone is ready",
+    "4) Press Start Game",
+    "5) Use Pause / Resume only if needed",
+    "6) Press End Game to stop current round",
+    "7) Use Clear Scores for next round or Reset Room for a full restart",
+  ];
+
+  return (
+    <Card>
+      <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>Recommended Live Flow</div>
+      <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
+        Follow this order to run the event smoothly.
+      </div>
+
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {steps.map((s, i) => (
+          <div
+            key={i}
+            style={{
+              borderRadius: 16,
+              border: `1px solid ${GLASS_STROKE}`,
+              background: i === 0 ? PRIMARY_GRAD_SOFT : "rgba(255,255,255,.66)",
+              padding: "12px 14px",
+              boxShadow: SHADOW_SOFT,
+              fontWeight: 950,
+              color: TXT,
+            }}
+          >
+            {s}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+export default function OperatorPage() {
+  const socket = getSocket();
+  const {
+    connected,
+    roomOpen,
+    phase,
+    cfg,
+    lobbyEndsAt,
+    matchEndsAt,
+    event,
+    warn,
+    toast,
+    topPlayers,
+    topTeams,
+    roster,
+  } = useGameState((s) => s);
+
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [operatorKey, setOperatorKey] = useState(() => localStorage.getItem(OPERATOR_KEY_STORAGE) || "");
+  const [confirmAction, setConfirmAction] = useState("");
+  const [busy, setBusy] = useState("");
+  const [localToast, setLocalToast] = useState("");
+
+  const [form, setForm] = useState({
+    mode: cfg?.mode || "SOLO",
+    lobbySec: Number(cfg?.lobbySec ?? 10),
+    matchSec: Number(cfg?.matchSec ?? 90),
+    warnSec: Number(cfg?.warnSec ?? 4),
+    eventMinSec: Number(cfg?.eventMinSec ?? 3),
+    eventMaxSec: Number(cfg?.eventMaxSec ?? 3),
+    betweenMinSec: Number(cfg?.betweenMinSec ?? 8),
+    betweenMaxSec: Number(cfg?.betweenMaxSec ?? 14),
+    maxTeamSize: Number(cfg?.maxTeamSize ?? 5),
+  });
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 150);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(OPERATOR_KEY_STORAGE, operatorKey);
+  }, [operatorKey]);
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      mode: cfg?.mode || prev.mode,
+      lobbySec: Number(cfg?.lobbySec ?? prev.lobbySec),
+      matchSec: Number(cfg?.matchSec ?? prev.matchSec),
+      warnSec: Number(cfg?.warnSec ?? prev.warnSec),
+      eventMinSec: Number(cfg?.eventMinSec ?? prev.eventMinSec),
+      eventMaxSec: Number(cfg?.eventMaxSec ?? prev.eventMaxSec),
+      betweenMinSec: Number(cfg?.betweenMinSec ?? prev.betweenMinSec),
+      betweenMaxSec: Number(cfg?.betweenMaxSec ?? prev.betweenMaxSec),
+      maxTeamSize: Number(cfg?.maxTeamSize ?? prev.maxTeamSize),
+    }));
+  }, [cfg]);
+
+  useEffect(() => {
+    if (!socket) return;
+    try {
+      socket.emit("join_role", { role: "admin" });
+    } catch {}
+  }, [socket]);
+
+  const lobbyLeft = lobbyEndsAt ? msToSecCeil(lobbyEndsAt - nowMs) : 0;
+  const matchLeft = matchEndsAt ? msToSecCeil(matchEndsAt - nowMs) : 0;
+  const eventLeft = event?.endsAt ? msToSecCeil(event.endsAt - nowMs) : 0;
+
+  const phaseText =
+    phase === "playing" ? `playing · ${matchLeft}s left`
+    : phase === "lobby" ? `lobby · ${lobbyLeft}s left`
+    : phase === "paused" ? "paused"
+    : phase || "idle";
+
+  const playersCount = Array.isArray(roster) ? roster.length : Array.isArray(topPlayers) ? topPlayers.length : 0;
+  const teamsCount = Array.isArray(topTeams) ? topTeams.length : 0;
+
+  const roomTone = roomOpen ? "success" : "danger";
+  const phaseTone =
+    phase === "playing" ? "success"
+    : phase === "paused" ? "warning"
+    : phase === "ended" ? "danger"
+    : "default";
+
+  const modeTone = cfg?.mode === "TEAM" ? "warning" : "default";
+
+  const eventLabel = !event?.active
+    ? "No active event"
+    : event?.type === "BOMB"
+      ? `Bomb · ${eventLeft}s`
+      : event?.type === "BONUS"
+        ? `Bonus · ${eventLeft}s`
+        : `Event · ${eventLeft}s`;
+
+  function setNumberField(key, value) {
+    const n = Number(value);
+    setForm((prev) => ({
+      ...prev,
+      [key]: Number.isFinite(n) ? n : 0,
+    }));
+  }
+
+  function emitWithKey(eventName, payload = {}) {
+    if (!socket) return;
+    if (!operatorKey.trim()) {
+      setLocalToast("Please enter operator key first");
+      return;
+    }
+
+    setBusy(eventName);
+    try {
+      socket.emit(eventName, {
+        adminKey: operatorKey.trim(),
+        ...payload,
+      });
+      setLocalToast("Command sent");
+    } catch {
+      setLocalToast("Failed to send command");
+    } finally {
+      setTimeout(() => setBusy(""), 350);
+    }
+  }
+
+  function openRoom() {
+    emitWithKey(OP_EVENTS.openRoom);
+  }
+
+  function closeRoom() {
+    emitWithKey(OP_EVENTS.closeRoom);
+  }
+
+  function startGame() {
+    emitWithKey(OP_EVENTS.startGame);
+  }
+
+  function pauseGame() {
+    emitWithKey(OP_EVENTS.pauseGame);
+  }
+
+  function resumeGame() {
+    emitWithKey(OP_EVENTS.resumeGame);
+  }
+
+  function endGame() {
+    emitWithKey(OP_EVENTS.endGame);
+    setConfirmAction("");
+  }
+
+  function clearResults() {
+    emitWithKey(OP_EVENTS.clearResults);
+    setConfirmAction("");
+  }
+
+  function resetRoom() {
+    emitWithKey(OP_EVENTS.resetRoom);
+    setConfirmAction("");
+  }
+
+  function applySettings() {
+    const payload = {
+      mode: form.mode,
+      lobbySec: Number(form.lobbySec),
+      matchSec: Number(form.matchSec),
+      warnSec: Number(form.warnSec),
+      eventMinSec: Number(form.eventMinSec),
+      eventMaxSec: Number(form.eventMaxSec),
+      betweenMinSec: Number(form.betweenMinSec),
+      betweenMaxSec: Number(form.betweenMaxSec),
+      maxTeamSize: Number(form.maxTeamSize),
+    };
+    emitWithKey(OP_EVENTS.applySettings, payload);
+  }
+
+  const canOpenRoom = !roomOpen;
+  const canCloseRoom = !!roomOpen;
+  const canStartGame = phase !== "playing" && phase !== "lobby";
+  const canPauseGame = phase === "playing";
+  const canResumeGame = phase === "paused";
+  const canEndGame = phase === "playing" || phase === "paused" || phase === "lobby";
+  const canApplySettings = true;
+
+  const dangerHint = useMemo(() => {
+    if (confirmAction === "end") {
+      return {
+        title: "Confirm End Game",
+        desc: "This stops the current round immediately and locks the round result.",
+        label: "Yes, End Game",
+        onConfirm: endGame,
+        tone: "warning",
+      };
+    }
+    if (confirmAction === "clear") {
+      return {
+        title: "Confirm Clear Scores",
+        desc: "This resets all scores back to 0. Players stay in the room.",
+        label: "Yes, Clear Scores",
+        onConfirm: clearResults,
+        tone: "warning",
+      };
+    }
+    if (confirmAction === "reset") {
+      return {
+        title: "Confirm Reset Room",
+        desc: "This fully resets the room and may disconnect/kick players. Use only for a full restart.",
+        label: "Yes, Reset Room",
+        onConfirm: resetRoom,
+        tone: "danger",
+      };
+    }
+    return null;
+  }, [confirmAction]);
+
+  const helperCards = [
+    {
+      title: "Open Room",
+      desc: "Allow players to join the room. Use this before registration or before the next round starts.",
+      tone: "success",
+    },
+    {
+      title: "Close Room",
+      desc: "Stop new players from joining. Existing players remain in the room.",
+      tone: "warning",
+    },
+    {
+      title: "Start Game",
+      desc: "Begin the round. If lobby is enabled, countdown starts first, then gameplay begins.",
+      tone: "success",
+    },
+    {
+      title: "Pause / Resume",
+      desc: "Pause freezes the current game. Resume continues from the paused state.",
+      tone: "warning",
+    },
+    {
+      title: "End Game",
+      desc: "Stop the current round immediately and keep the result of that round.",
+      tone: "danger",
+    },
+    {
+      title: "Clear Scores / Reset Room",
+      desc: "Clear Scores keeps players but resets score to 0. Reset Room is a full restart and is more dangerous.",
+      tone: "danger",
+    },
+  ];
+
+  return (
+    <div style={{ minHeight: "100dvh", background: PASTEL_BG, color: TXT, padding: 22 }}>
+      <div className="container">
+        <TopBar
+          title="Game Operator Console"
+          subtitle="Gameplay only • Department data is locked"
+          right={<TopPills roomOpen={roomOpen} phase={phase} mode={cfg?.mode || "SOLO"} />}
+        />
+
+        {!connected && (
+          <div
+            style={{
+              marginBottom: 14,
+              borderRadius: 18,
+              border: `1px solid ${WARNING_RING}`,
+              background: WARN_BG,
+              boxShadow: SHADOW_SOFT,
+              padding: "12px 14px",
+              fontWeight: 1000,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <Icon name="warning" size={18} />
+            Reconnecting to server… please wait
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "1.1fr 0.9fr" }}>
+          <div style={{ display: "grid", gap: 16 }}>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Live Status</div>
+                  <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
+                    Monitor room state before pressing controls
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <a
+                    href="/player"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      textDecoration: "none",
+                      borderRadius: 14,
+                      border: `1px solid ${GLASS_STROKE}`,
+                      background: SOFT_BG,
+                      color: TXT,
+                      padding: "10px 12px",
+                      boxShadow: SHADOW_SOFT,
+                      fontWeight: 1000,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <Icon name="user" size={18} />
+                    Player View
+                  </a>
+
+                  <a
+                    href="/screen"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      textDecoration: "none",
+                      borderRadius: 14,
+                      border: `1px solid ${GLASS_STROKE}`,
+                      background: SOFT_BG,
+                      color: TXT,
+                      padding: "10px 12px",
+                      boxShadow: SHADOW_SOFT,
+                      fontWeight: 1000,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <Icon name="screen" size={18} />
+                    Screen View
+                  </a>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <StatusPill label="Room" value={roomOpen ? "OPEN" : "CLOSED"} tone={roomTone} />
+                <StatusPill label="Phase" value={phaseText} tone={phaseTone} />
+                <StatusPill label="Mode" value={cfg?.mode || "SOLO"} tone={modeTone} />
+                <StatusPill label="Players" value={playersCount} />
+                <StatusPill label="Teams" value={teamsCount} />
+                <StatusPill label="Event" value={eventLabel} tone={event?.active ? "warning" : "default"} />
+              </div>
+
+              {warn && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    borderRadius: 18,
+                    border: `1px solid ${WARNING_RING}`,
+                    background: WARN_BG,
+                    boxShadow: SHADOW_SOFT,
+                    padding: "12px 14px",
+                    fontWeight: 1000,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <Icon name="warning" size={18} />
+                  Event incoming in <b>{warn.left}</b> seconds
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Main Controls</div>
+              <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
+                Use only the buttons needed during the live event
+              </div>
+
+              <CardInner style={{ marginTop: 14 }}>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+                  <ActionButton
+                    label="Open Room"
+                    sublabel="Allow players to join the room"
+                    icon={<Icon name="doorOpen" size={18} />}
+                    tone="success"
+                    onClick={openRoom}
+                    disabled={!canOpenRoom || busy === OP_EVENTS.openRoom}
+                  />
+
+                  <ActionButton
+                    label="Close Room"
+                    sublabel="Stop new players from joining"
+                    icon={<Icon name="doorClosed" size={18} />}
+                    tone="warning"
+                    onClick={closeRoom}
+                    disabled={!canCloseRoom || busy === OP_EVENTS.closeRoom}
+                  />
+
+                  <ActionButton
+                    label="Start Game"
+                    sublabel="Start lobby or start the round"
+                    icon={<Icon name="play" size={18} />}
+                    tone="success"
+                    onClick={startGame}
+                    disabled={!canStartGame || busy === OP_EVENTS.startGame}
+                  />
+
+                  {phase === "paused" ? (
+                    <ActionButton
+                      label="Resume Game"
+                      sublabel="Continue from paused state"
+                      icon={<Icon name="play" size={18} />}
+                      tone="success"
+                      onClick={resumeGame}
+                      disabled={!canResumeGame || busy === OP_EVENTS.resumeGame}
+                    />
+                  ) : (
+                    <ActionButton
+                      label="Pause Game"
+                      sublabel="Freeze the current round temporarily"
+                      icon={<Icon name="pause" size={18} />}
+                      tone="warning"
+                      onClick={pauseGame}
+                      disabled={!canPauseGame || busy === OP_EVENTS.pauseGame}
+                    />
+                  )}
+
+                  <ActionButton
+                    label="End Game"
+                    sublabel="Stop current round immediately"
+                    icon={<Icon name="stop" size={18} />}
+                    tone="danger"
+                    onClick={() => setConfirmAction("end")}
+                    disabled={!canEndGame}
+                  />
+
+                  <ActionButton
+                    label="Apply Settings"
+                    sublabel="Save gameplay mode and timer settings"
+                    icon={<Icon name="settings" size={18} />}
+                    tone="primary"
+                    onClick={applySettings}
+                    disabled={!canApplySettings || busy === OP_EVENTS.applySettings}
+                  />
+                </div>
+
+                <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+                  <ActionButton
+                    label="Clear Scores"
+                    sublabel="Reset scores to 0 and keep players in room"
+                    icon={<Icon name="refresh" size={18} />}
+                    tone="ghost"
+                    onClick={() => setConfirmAction("clear")}
+                  />
+
+                  <ActionButton
+                    label="Reset Room"
+                    sublabel="Full restart — may disconnect or kick players"
+                    icon={<Icon name="warning" size={18} />}
+                    tone="danger"
+                    onClick={() => setConfirmAction("reset")}
+                  />
+                </div>
+
+                {dangerHint && (
+                  <ConfirmStrip
+                    title={dangerHint.title}
+                    desc={dangerHint.desc}
+                    confirmLabel={dangerHint.label}
+                    onConfirm={dangerHint.onConfirm}
+                    onCancel={() => setConfirmAction("")}
+                    tone={dangerHint.tone}
+                  />
+                )}
+              </CardInner>
+            </Card>
+
+            <Card>
+              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Game Setup</div>
+              <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
+                Adjust gameplay timing only. No department settings here.
+              </div>
+
+              <CardInner style={{ marginTop: 14 }}>
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0,1fr))" }}>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>Mode</div>
+                    <select
+                      value={form.mode}
+                      onChange={(e) => setForm((prev) => ({ ...prev, mode: e.target.value }))}
+                      style={{
+                        width: "100%",
+                        padding: "11px 12px",
+                        borderRadius: 16,
+                        border: `1px solid ${GLASS_STROKE}`,
+                        background: "rgba(255,255,255,.74)",
+                        color: TXT,
+                        outline: "none",
+                        boxShadow: SHADOW_SOFT,
+                        fontWeight: 900,
+                      }}
+                    >
+                      <option value="SOLO">SOLO</option>
+                      <option value="TEAM">TEAM</option>
+                    </select>
+                  </label>
+
+                  <InputField
+                    label="Lobby (sec)"
+                    type="number"
+                    min={0}
+                    value={form.lobbySec}
+                    onChange={(e) => setNumberField("lobbySec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Match (sec)"
+                    type="number"
+                    min={5}
+                    value={form.matchSec}
+                    onChange={(e) => setNumberField("matchSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Warn (sec)"
+                    type="number"
+                    min={0}
+                    value={form.warnSec}
+                    onChange={(e) => setNumberField("warnSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Event min (sec)"
+                    type="number"
+                    min={0}
+                    value={form.eventMinSec}
+                    onChange={(e) => setNumberField("eventMinSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Event max (sec)"
+                    type="number"
+                    min={0}
+                    value={form.eventMaxSec}
+                    onChange={(e) => setNumberField("eventMaxSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Between min (sec)"
+                    type="number"
+                    min={0}
+                    value={form.betweenMinSec}
+                    onChange={(e) => setNumberField("betweenMinSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Between max (sec)"
+                    type="number"
+                    min={0}
+                    value={form.betweenMaxSec}
+                    onChange={(e) => setNumberField("betweenMaxSec", e.target.value)}
+                  />
+
+                  <InputField
+                    label="Max team size"
+                    type="number"
+                    min={1}
+                    value={form.maxTeamSize}
+                    onChange={(e) => setNumberField("maxTeamSize", e.target.value)}
+                  />
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>Operator Key</div>
+                    <input
+                      type="password"
+                      value={operatorKey}
+                      placeholder="Enter operator/admin key"
+                      onChange={(e) => setOperatorKey(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "11px 12px",
+                        borderRadius: 16,
+                        border: `1px solid ${GLASS_STROKE}`,
+                        background: "rgba(255,255,255,.74)",
+                        color: TXT,
+                        outline: "none",
+                        boxShadow: SHADOW_SOFT,
+                        fontWeight: 900,
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 14,
+                    borderRadius: 16,
+                    border: `1px solid ${SUCCESS_RING}`,
+                    background: "linear-gradient(180deg, rgba(22,163,74,.10), rgba(255,255,255,.68))",
+                    boxShadow: SHADOW_SOFT,
+                    padding: "12px 14px",
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                    color: TXT,
+                    fontWeight: 900,
+                  }}
+                >
+                  <Icon name="sparkle" size={18} />
+                  Apply Settings updates gameplay flow only. Department data stays untouched.
+                </div>
+              </CardInner>
+            </Card>
+          </div>
+
+          <div style={{ display: "grid", gap: 16 }}>
+            <FlowGuideCard />
+
+            <Card>
+              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>What each button does</div>
+              <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
+                Simple guidance for agency staff
+              </div>
+
+              <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                {helperCards.map((item) => {
+                  const bg =
+                    item.tone === "success"
+                      ? "linear-gradient(180deg, rgba(22,163,74,.10), rgba(255,255,255,.66))"
+                      : item.tone === "warning"
+                        ? "linear-gradient(180deg, rgba(245,158,11,.10), rgba(255,255,255,.66))"
+                        : "linear-gradient(180deg, rgba(239,68,68,.08), rgba(255,255,255,.66))";
+
+                  const border =
+                    item.tone === "success"
+                      ? SUCCESS_RING
+                      : item.tone === "warning"
+                        ? WARNING_RING
+                        : DANGER_RING;
+
+                  return (
+                    <div
+                      key={item.title}
+                      style={{
+                        borderRadius: 16,
+                        border: `1px solid ${border}`,
+                        background: bg,
+                        boxShadow: SHADOW_SOFT,
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <div style={{ fontWeight: 1100, color: TXT }}>{item.title}</div>
+                      <div style={{ marginTop: 4, color: MUTED, fontWeight: 800, lineHeight: 1.45 }}>
+                        {item.desc}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>Live Leaderboard</div>
+              <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
+                Quick view of current results
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Leaderboard mode={cfg?.mode || "SOLO"} topPlayers={topPlayers || []} topTeams={topTeams || []} />
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <Toast toast={localToast ? { type: "info", text: localToast } : toast} />
+        </div>
+      </div>
+    </div>
+  );
+}
