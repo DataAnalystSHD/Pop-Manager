@@ -8,38 +8,21 @@ import TopBar, { TopPills } from "../components/TopBar.jsx";
 import Toast from "../components/Toast.jsx";
 import Leaderboard from "../components/Leaderboard.jsx";
 
-/**
- * =========================================================
- * Operator Console (Gameplay only)
- * ---------------------------------------------------------
- * This page is intentionally SAFE:
- * - no department CRUD
- * - no manager photo upload
- * - no data-management actions
- * - only live game operation
- *
- * IMPORTANT:
- * If your existing AdminPage uses different socket event names,
- * only update the OP_EVENTS map below.
- * =========================================================
- */
-
 const OPERATOR_KEY_STORAGE = "pop_operator_key";
 
 /**
- * Change these ONLY if your current backend/admin socket event names differ.
- * Try to match the exact emits from your current AdminPage.
+ * IMPORTANT:
+ * map this to your CURRENT backend socket event names
  */
 const OP_EVENTS = {
-  openRoom: "admin_room_toggle",
-  closeRoom: "admin_room_toggle",
+  roomToggle: "admin_room_toggle",
   startGame: "admin_start",
-  pauseGame: "admin_pause_toggle",
-  resumeGame: "admin_pause_toggle",
+  pauseToggle: "admin_pause_toggle",
   endGame: "admin_end",
   clearResults: "admin_clear_results",
   resetRoom: "admin_reset_room",
   applySettings: "admin_config",
+  operatorLogin: "operator_login",
 };
 
 const PASTEL_BG =
@@ -153,13 +136,6 @@ function Icon({ name, size = 18, style = {}, className = "" }) {
           <path d="M4 21a8 8 0 0116 0" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
         </svg>
       );
-    case "clock":
-      return (
-        <svg {...common}>
-          <path d="M12 8v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M12 22a10 10 0 100-20 10 10 0 000 20z" stroke="currentColor" strokeWidth="2.2" />
-        </svg>
-      );
     case "sparkle":
       return (
         <svg {...common}>
@@ -224,31 +200,11 @@ function ActionButton({
   disabled = false,
 }) {
   const tones = {
-    primary: {
-      bg: PRIMARY_GRAD,
-      color: "#fff",
-      border: "transparent",
-    },
-    success: {
-      bg: SUCCESS_GRAD,
-      color: "#fff",
-      border: "transparent",
-    },
-    warning: {
-      bg: WARNING_GRAD,
-      color: "#fff",
-      border: "transparent",
-    },
-    danger: {
-      bg: DANGER_GRAD,
-      color: "#fff",
-      border: "transparent",
-    },
-    ghost: {
-      bg: SOFT_BG,
-      color: TXT,
-      border: GLASS_STROKE,
-    },
+    primary: { bg: PRIMARY_GRAD, color: "#fff", border: "transparent" },
+    success: { bg: SUCCESS_GRAD, color: "#fff", border: "transparent" },
+    warning: { bg: WARNING_GRAD, color: "#fff", border: "transparent" },
+    danger: { bg: DANGER_GRAD, color: "#fff", border: "transparent" },
+    ghost: { bg: SOFT_BG, color: TXT, border: GLASS_STROKE },
   };
 
   const t = tones[tone] || tones.primary;
@@ -276,7 +232,7 @@ function ActionButton({
         {icon}
         <span>{label}</span>
       </div>
-      <div style={{ fontSize: 12, lineHeight: 1.35, opacity: t.tone === "ghost" ? 0.8 : 0.95, fontWeight: 800 }}>
+      <div style={{ fontSize: 12, lineHeight: 1.35, opacity: 0.95, fontWeight: 800 }}>
         {sublabel}
       </div>
     </button>
@@ -368,8 +324,70 @@ function ConfirmStrip({ title, desc, confirmLabel, onConfirm, onCancel, tone = "
             boxShadow: SHADOW_SOFT,
           }}
         >
-          Cancel
+          ยกเลิก
         </button>
+      </div>
+    </div>
+  );
+}
+
+function KeyModal({ value, onChange, onSubmit }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 999999,
+        background: "rgba(15,23,42,.38)",
+        backdropFilter: "blur(10px)",
+        display: "grid",
+        placeItems: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: "min(92vw, 460px)",
+          borderRadius: 28,
+          border: `1px solid ${GLASS_STROKE}`,
+          background: "rgba(255,255,255,.88)",
+          boxShadow: "0 50px 180px -90px rgba(15,23,42,.45)",
+          padding: 22,
+        }}
+      >
+        <div style={{ fontSize: 26, fontWeight: 1100, color: TXT }}>กรอก Operator Key</div>
+        <div style={{ marginTop: 8, color: MUTED, fontWeight: 900, lineHeight: 1.5 }}>
+          หน้านี้ใช้สำหรับควบคุมเกมเท่านั้น และไม่สามารถแก้ข้อมูลแผนกได้
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <InputField
+            label="Operator Key / Admin Key"
+            type="password"
+            value={value}
+            onChange={onChange}
+            placeholder="กรอกรหัสเพื่อเข้าใช้งาน"
+          />
+        </div>
+
+        <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+          <button
+            onClick={onSubmit}
+            style={{
+              flex: 1,
+              borderRadius: 18,
+              border: "0",
+              background: PRIMARY_GRAD,
+              color: "#fff",
+              padding: "12px 16px",
+              fontWeight: 1100,
+              cursor: "pointer",
+              boxShadow: SHADOW_SOFT,
+            }}
+          >
+            เข้าใช้งาน
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -377,20 +395,20 @@ function ConfirmStrip({ title, desc, confirmLabel, onConfirm, onCancel, tone = "
 
 function FlowGuideCard() {
   const steps = [
-    "1) Apply Settings before the round starts",
-    "2) Open Room to let players join",
-    "3) Watch player count and confirm everyone is ready",
-    "4) Press Start Game",
-    "5) Use Pause / Resume only if needed",
-    "6) Press End Game to stop current round",
-    "7) Use Clear Scores for next round or Reset Room for a full restart",
+    "1) ตั้งค่าเกมก่อนเริ่มรอบ",
+    "2) เปิดห้องให้ผู้เล่นเข้าร่วม",
+    "3) ดูจำนวนผู้เล่นและตรวจสอบความพร้อม",
+    "4) กดเริ่มเกม",
+    "5) ใช้หยุดชั่วคราว / เล่นต่อ เมื่อต้องการ",
+    "6) กดจบเกมเมื่อจบรอบ",
+    "7) ใช้ล้างคะแนนสำหรับรอบใหม่ หรือรีเซ็ตห้องหากต้องเริ่มใหม่ทั้งหมด",
   ];
 
   return (
     <Card>
-      <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>Recommended Live Flow</div>
+      <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>ลำดับการใช้งานแนะนำ</div>
       <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
-        Follow this order to run the event smoothly.
+        ทำตามลำดับนี้เพื่อให้การจัดเกมราบรื่น
       </div>
 
       <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
@@ -434,19 +452,20 @@ export default function OperatorPage() {
 
   const [nowMs, setNowMs] = useState(Date.now());
   const [operatorKey, setOperatorKey] = useState(() => localStorage.getItem(OPERATOR_KEY_STORAGE) || "");
+  const [showKeyModal, setShowKeyModal] = useState(() => !localStorage.getItem(OPERATOR_KEY_STORAGE));
   const [confirmAction, setConfirmAction] = useState("");
   const [busy, setBusy] = useState("");
   const [localToast, setLocalToast] = useState("");
 
   const [form, setForm] = useState({
     mode: cfg?.mode || "SOLO",
-    lobbySec: Number(cfg?.lobbySec ?? 10),
-    matchSec: Number(cfg?.matchSec ?? 90),
-    warnSec: Number(cfg?.warnSec ?? 4),
-    eventMinSec: Number(cfg?.eventMinSec ?? 3),
-    eventMaxSec: Number(cfg?.eventMaxSec ?? 3),
-    betweenMinSec: Number(cfg?.betweenMinSec ?? 8),
-    betweenMaxSec: Number(cfg?.betweenMaxSec ?? 14),
+    lobbySec: Number(cfg?.lobbySeconds ?? 10),
+    matchSec: Number(cfg?.matchSeconds ?? 90),
+    warnSec: Number(cfg?.warnSeconds ?? 4),
+    eventMinSec: Number(cfg?.eventSecondsMin ?? 3),
+    eventMaxSec: Number(cfg?.eventSecondsMax ?? 3),
+    betweenMinSec: Number(cfg?.betweenEventSecondsMin ?? 8),
+    betweenMaxSec: Number(cfg?.betweenEventSecondsMax ?? 14),
     maxTeamSize: Number(cfg?.maxTeamSize ?? 5),
   });
 
@@ -463,13 +482,13 @@ export default function OperatorPage() {
     setForm((prev) => ({
       ...prev,
       mode: cfg?.mode || prev.mode,
-      lobbySec: Number(cfg?.lobbySec ?? prev.lobbySec),
-      matchSec: Number(cfg?.matchSec ?? prev.matchSec),
-      warnSec: Number(cfg?.warnSec ?? prev.warnSec),
-      eventMinSec: Number(cfg?.eventMinSec ?? prev.eventMinSec),
-      eventMaxSec: Number(cfg?.eventMaxSec ?? prev.eventMaxSec),
-      betweenMinSec: Number(cfg?.betweenMinSec ?? prev.betweenMinSec),
-      betweenMaxSec: Number(cfg?.betweenMaxSec ?? prev.betweenMaxSec),
+      lobbySec: Number(cfg?.lobbySeconds ?? prev.lobbySec),
+      matchSec: Number(cfg?.matchSeconds ?? prev.matchSec),
+      warnSec: Number(cfg?.warnSeconds ?? prev.warnSec),
+      eventMinSec: Number(cfg?.eventSecondsMin ?? prev.eventMinSec),
+      eventMaxSec: Number(cfg?.eventSecondsMax ?? prev.eventMaxSec),
+      betweenMinSec: Number(cfg?.betweenEventSecondsMin ?? prev.betweenMinSec),
+      betweenMaxSec: Number(cfg?.betweenEventSecondsMax ?? prev.betweenMaxSec),
       maxTeamSize: Number(cfg?.maxTeamSize ?? prev.maxTeamSize),
     }));
   }, [cfg]);
@@ -477,7 +496,7 @@ export default function OperatorPage() {
   useEffect(() => {
     if (!socket) return;
     try {
-      socket.emit("join_role", { role: "admin" });
+      socket.emit("join_role", { role: "operator" });
     } catch {}
   }, [socket]);
 
@@ -486,9 +505,10 @@ export default function OperatorPage() {
   const eventLeft = event?.endsAt ? msToSecCeil(event.endsAt - nowMs) : 0;
 
   const phaseText =
-    phase === "playing" ? `playing · ${matchLeft}s left`
-    : phase === "lobby" ? `lobby · ${lobbyLeft}s left`
-    : phase === "paused" ? "paused"
+    phase === "playing" ? `กำลังเล่น · เหลือ ${matchLeft} วินาที`
+    : phase === "lobby" ? `นับถอยหลัง · เหลือ ${lobbyLeft} วินาที`
+    : phase === "paused" ? "หยุดชั่วคราว"
+    : phase === "ended" ? "จบเกม"
     : phase || "idle";
 
   const playersCount = Array.isArray(roster) ? roster.length : Array.isArray(topPlayers) ? topPlayers.length : 0;
@@ -504,12 +524,12 @@ export default function OperatorPage() {
   const modeTone = cfg?.mode === "TEAM" ? "warning" : "default";
 
   const eventLabel = !event?.active
-    ? "No active event"
+    ? "ไม่มีอีเวนต์"
     : event?.type === "BOMB"
-      ? `Bomb · ${eventLeft}s`
+      ? `Bomb · ${eventLeft} วิ`
       : event?.type === "BONUS"
-        ? `Bonus · ${eventLeft}s`
-        : `Event · ${eventLeft}s`;
+        ? `Bonus · ${eventLeft} วิ`
+        : `Event · ${eventLeft} วิ`;
 
   function setNumberField(key, value) {
     const n = Number(value);
@@ -522,7 +542,8 @@ export default function OperatorPage() {
   function emitWithKey(eventName, payload = {}) {
     if (!socket) return;
     if (!operatorKey.trim()) {
-      setLocalToast("Please enter operator key first");
+      setShowKeyModal(true);
+      setLocalToast("กรุณากรอกรหัสก่อนใช้งาน");
       return;
     }
 
@@ -532,32 +553,41 @@ export default function OperatorPage() {
         adminKey: operatorKey.trim(),
         ...payload,
       });
-      setLocalToast("Command sent");
+      setLocalToast("ส่งคำสั่งแล้ว");
     } catch {
-      setLocalToast("Failed to send command");
+      setLocalToast("ส่งคำสั่งไม่สำเร็จ");
     } finally {
       setTimeout(() => setBusy(""), 350);
     }
   }
 
+  function submitKey() {
+    if (!operatorKey.trim()) {
+      setLocalToast("กรุณากรอกรหัส");
+      return;
+    }
+
+    if (socket) {
+      socket.emit(OP_EVENTS.operatorLogin, { key: operatorKey.trim() });
+    }
+    setShowKeyModal(false);
+    setLocalToast("เข้าสู่หน้า Operator แล้ว");
+  }
+
   function openRoom() {
-    emitWithKey(OP_EVENTS.openRoom);
+    emitWithKey(OP_EVENTS.roomToggle, { open: true });
   }
 
   function closeRoom() {
-    emitWithKey(OP_EVENTS.closeRoom);
+    emitWithKey(OP_EVENTS.roomToggle, { open: false });
   }
 
   function startGame() {
     emitWithKey(OP_EVENTS.startGame);
   }
 
-  function pauseGame() {
-    emitWithKey(OP_EVENTS.pauseGame);
-  }
-
-  function resumeGame() {
-    emitWithKey(OP_EVENTS.resumeGame);
+  function pauseOrResume() {
+    emitWithKey(OP_EVENTS.pauseToggle);
   }
 
   function endGame() {
@@ -576,18 +606,17 @@ export default function OperatorPage() {
   }
 
   function applySettings() {
-    const payload = {
+    emitWithKey(OP_EVENTS.applySettings, {
       mode: form.mode,
-      lobbySec: Number(form.lobbySec),
-      matchSec: Number(form.matchSec),
-      warnSec: Number(form.warnSec),
-      eventMinSec: Number(form.eventMinSec),
-      eventMaxSec: Number(form.eventMaxSec),
-      betweenMinSec: Number(form.betweenMinSec),
-      betweenMaxSec: Number(form.betweenMaxSec),
+      lobbySeconds: Number(form.lobbySec),
+      matchSeconds: Number(form.matchSec),
+      warnSeconds: Number(form.warnSec),
+      eventSecondsMin: Number(form.eventMinSec),
+      eventSecondsMax: Number(form.eventMaxSec),
+      betweenEventSecondsMin: Number(form.betweenMinSec),
+      betweenEventSecondsMax: Number(form.betweenMaxSec),
       maxTeamSize: Number(form.maxTeamSize),
-    };
-    emitWithKey(OP_EVENTS.applySettings, payload);
+    });
   }
 
   const canOpenRoom = !roomOpen;
@@ -596,32 +625,31 @@ export default function OperatorPage() {
   const canPauseGame = phase === "playing";
   const canResumeGame = phase === "paused";
   const canEndGame = phase === "playing" || phase === "paused" || phase === "lobby";
-  const canApplySettings = true;
 
   const dangerHint = useMemo(() => {
     if (confirmAction === "end") {
       return {
-        title: "Confirm End Game",
-        desc: "This stops the current round immediately and locks the round result.",
-        label: "Yes, End Game",
+        title: "ยืนยันการจบเกม",
+        desc: "การกระทำนี้จะหยุดรอบปัจจุบันทันที",
+        label: "ยืนยันจบเกม",
         onConfirm: endGame,
         tone: "warning",
       };
     }
     if (confirmAction === "clear") {
       return {
-        title: "Confirm Clear Scores",
-        desc: "This resets all scores back to 0. Players stay in the room.",
-        label: "Yes, Clear Scores",
+        title: "ยืนยันการล้างคะแนน",
+        desc: "คะแนนจะถูกรีเซ็ตเป็น 0 แต่ผู้เล่นยังอยู่ในห้อง",
+        label: "ยืนยันล้างคะแนน",
         onConfirm: clearResults,
         tone: "warning",
       };
     }
     if (confirmAction === "reset") {
       return {
-        title: "Confirm Reset Room",
-        desc: "This fully resets the room and may disconnect/kick players. Use only for a full restart.",
-        label: "Yes, Reset Room",
+        title: "ยืนยันการรีเซ็ตห้อง",
+        desc: "การกระทำนี้อาจล้างผู้เล่นทั้งหมดและเริ่มห้องใหม่",
+        label: "ยืนยันรีเซ็ตห้อง",
         onConfirm: resetRoom,
         tone: "danger",
       };
@@ -631,43 +659,51 @@ export default function OperatorPage() {
 
   const helperCards = [
     {
-      title: "Open Room",
-      desc: "Allow players to join the room. Use this before registration or before the next round starts.",
+      title: "เปิดห้อง",
+      desc: "อนุญาตให้ผู้เล่นเข้าร่วมห้อง ใช้ก่อนเริ่มลงทะเบียนหรือก่อนเริ่มรอบ",
       tone: "success",
     },
     {
-      title: "Close Room",
-      desc: "Stop new players from joining. Existing players remain in the room.",
+      title: "ปิดห้อง",
+      desc: "หยุดผู้เล่นใหม่ไม่ให้เข้าห้อง แต่คนที่อยู่แล้วจะยังอยู่ต่อ",
       tone: "warning",
     },
     {
-      title: "Start Game",
-      desc: "Begin the round. If lobby is enabled, countdown starts first, then gameplay begins.",
+      title: "เริ่มเกม",
+      desc: "เริ่มนับถอยหลังหรือเริ่มรอบเกมตามการตั้งค่า",
       tone: "success",
     },
     {
-      title: "Pause / Resume",
-      desc: "Pause freezes the current game. Resume continues from the paused state.",
+      title: "หยุดชั่วคราว / เล่นต่อ",
+      desc: "ใช้เมื่อต้องหยุดเกมชั่วคราว แล้วกดอีกครั้งเพื่อเล่นต่อ",
       tone: "warning",
     },
     {
-      title: "End Game",
-      desc: "Stop the current round immediately and keep the result of that round.",
+      title: "จบเกม",
+      desc: "หยุดรอบปัจจุบันทันทีและสรุปผลรอบนี้",
       tone: "danger",
     },
     {
-      title: "Clear Scores / Reset Room",
-      desc: "Clear Scores keeps players but resets score to 0. Reset Room is a full restart and is more dangerous.",
+      title: "ล้างคะแนน / รีเซ็ตห้อง",
+      desc: "ล้างคะแนนคือรีเซ็ตแต้มเป็น 0 ส่วนรีเซ็ตห้องคือเริ่มห้องใหม่ทั้งหมด",
       tone: "danger",
     },
   ];
 
   return (
     <div style={{ minHeight: "100dvh", background: PASTEL_BG, color: TXT, padding: 22 }}>
+      {showKeyModal && (
+        <KeyModal
+          value={operatorKey}
+          onChange={(e) => setOperatorKey(e.target.value)}
+          onSubmit={submitKey}
+        />
+      )}
+
       <div className="container">
         <TopBar
-          title="Game Operator Console"
-          subtitle="Gameplay only • Department data is locked"
+          title="หน้าควบคุมเกมสำหรับผู้จัด"
+          subtitle="ควบคุมเกมเท่านั้น • ข้อมูลแผนกถูกล็อก"
           right={<TopPills roomOpen={roomOpen} phase={phase} mode={cfg?.mode || "SOLO"} />}
         />
 
@@ -687,7 +723,7 @@ export default function OperatorPage() {
             }}
           >
             <Icon name="warning" size={18} />
-            Reconnecting to server… please wait
+            กำลังเชื่อมต่อเซิร์ฟเวอร์ใหม่...
           </div>
         )}
 
@@ -696,9 +732,9 @@ export default function OperatorPage() {
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Live Status</div>
+                  <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>สถานะปัจจุบัน</div>
                   <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
-                    Monitor room state before pressing controls
+                    ตรวจสอบสถานะก่อนกดปุ่มควบคุม
                   </div>
                 </div>
 
@@ -722,7 +758,7 @@ export default function OperatorPage() {
                     }}
                   >
                     <Icon name="user" size={18} />
-                    Player View
+                    หน้าผู้เล่น
                   </a>
 
                   <a
@@ -744,18 +780,18 @@ export default function OperatorPage() {
                     }}
                   >
                     <Icon name="screen" size={18} />
-                    Screen View
+                    หน้าจอแสดงผล
                   </a>
                 </div>
               </div>
 
               <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <StatusPill label="Room" value={roomOpen ? "OPEN" : "CLOSED"} tone={roomTone} />
-                <StatusPill label="Phase" value={phaseText} tone={phaseTone} />
-                <StatusPill label="Mode" value={cfg?.mode || "SOLO"} tone={modeTone} />
-                <StatusPill label="Players" value={playersCount} />
-                <StatusPill label="Teams" value={teamsCount} />
-                <StatusPill label="Event" value={eventLabel} tone={event?.active ? "warning" : "default"} />
+                <StatusPill label="ห้อง" value={roomOpen ? "เปิด" : "ปิด"} tone={roomTone} />
+                <StatusPill label="สถานะ" value={phaseText} tone={phaseTone} />
+                <StatusPill label="โหมด" value={cfg?.mode || "SOLO"} tone={modeTone} />
+                <StatusPill label="ผู้เล่น" value={playersCount} />
+                <StatusPill label="ทีม" value={teamsCount} />
+                <StatusPill label="อีเวนต์" value={eventLabel} tone={event?.active ? "warning" : "default"} />
               </div>
 
               {warn && (
@@ -774,69 +810,58 @@ export default function OperatorPage() {
                   }}
                 >
                   <Icon name="warning" size={18} />
-                  Event incoming in <b>{warn.left}</b> seconds
+                  จะมีอีเวนต์ในอีก <b>{warn.left}</b> วินาที
                 </div>
               )}
             </Card>
 
             <Card>
-              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Main Controls</div>
+              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>ปุ่มควบคุมหลัก</div>
               <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
-                Use only the buttons needed during the live event
+                ใช้เฉพาะปุ่มที่จำเป็นระหว่างจัดงาน
               </div>
 
               <CardInner style={{ marginTop: 14 }}>
                 <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
                   <ActionButton
-                    label="Open Room"
-                    sublabel="Allow players to join the room"
+                    label="เปิดห้อง"
+                    sublabel="อนุญาตให้ผู้เล่นเข้าร่วมห้อง"
                     icon={<Icon name="doorOpen" size={18} />}
                     tone="success"
                     onClick={openRoom}
-                    disabled={!canOpenRoom || busy === OP_EVENTS.openRoom}
+                    disabled={!canOpenRoom || busy === OP_EVENTS.roomToggle}
                   />
 
                   <ActionButton
-                    label="Close Room"
-                    sublabel="Stop new players from joining"
+                    label="ปิดห้อง"
+                    sublabel="หยุดผู้เล่นใหม่ไม่ให้เข้าร่วม"
                     icon={<Icon name="doorClosed" size={18} />}
                     tone="warning"
                     onClick={closeRoom}
-                    disabled={!canCloseRoom || busy === OP_EVENTS.closeRoom}
+                    disabled={!canCloseRoom || busy === OP_EVENTS.roomToggle}
                   />
 
                   <ActionButton
-                    label="Start Game"
-                    sublabel="Start lobby or start the round"
+                    label="เริ่มเกม"
+                    sublabel="เริ่มนับถอยหลังหรือเริ่มรอบ"
                     icon={<Icon name="play" size={18} />}
                     tone="success"
                     onClick={startGame}
                     disabled={!canStartGame || busy === OP_EVENTS.startGame}
                   />
 
-                  {phase === "paused" ? (
-                    <ActionButton
-                      label="Resume Game"
-                      sublabel="Continue from paused state"
-                      icon={<Icon name="play" size={18} />}
-                      tone="success"
-                      onClick={resumeGame}
-                      disabled={!canResumeGame || busy === OP_EVENTS.resumeGame}
-                    />
-                  ) : (
-                    <ActionButton
-                      label="Pause Game"
-                      sublabel="Freeze the current round temporarily"
-                      icon={<Icon name="pause" size={18} />}
-                      tone="warning"
-                      onClick={pauseGame}
-                      disabled={!canPauseGame || busy === OP_EVENTS.pauseGame}
-                    />
-                  )}
+                  <ActionButton
+                    label={phase === "paused" ? "เล่นต่อ" : "หยุดชั่วคราว"}
+                    sublabel={phase === "paused" ? "ดำเนินเกมต่อจากจุดเดิม" : "หยุดเกมชั่วคราว"}
+                    icon={phase === "paused" ? <Icon name="play" size={18} /> : <Icon name="pause" size={18} />}
+                    tone="warning"
+                    onClick={pauseOrResume}
+                    disabled={!(canPauseGame || canResumeGame) || busy === OP_EVENTS.pauseToggle}
+                  />
 
                   <ActionButton
-                    label="End Game"
-                    sublabel="Stop current round immediately"
+                    label="จบเกม"
+                    sublabel="หยุดรอบปัจจุบันทันที"
                     icon={<Icon name="stop" size={18} />}
                     tone="danger"
                     onClick={() => setConfirmAction("end")}
@@ -844,27 +869,27 @@ export default function OperatorPage() {
                   />
 
                   <ActionButton
-                    label="Apply Settings"
-                    sublabel="Save gameplay mode and timer settings"
+                    label="บันทึกการตั้งค่า"
+                    sublabel="บันทึกโหมดและเวลาเกม"
                     icon={<Icon name="settings" size={18} />}
                     tone="primary"
                     onClick={applySettings}
-                    disabled={!canApplySettings || busy === OP_EVENTS.applySettings}
+                    disabled={busy === OP_EVENTS.applySettings}
                   />
                 </div>
 
                 <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
                   <ActionButton
-                    label="Clear Scores"
-                    sublabel="Reset scores to 0 and keep players in room"
+                    label="ล้างคะแนน"
+                    sublabel="รีเซ็ตคะแนนเป็น 0 แต่ผู้เล่นยังอยู่"
                     icon={<Icon name="refresh" size={18} />}
                     tone="ghost"
                     onClick={() => setConfirmAction("clear")}
                   />
 
                   <ActionButton
-                    label="Reset Room"
-                    sublabel="Full restart — may disconnect or kick players"
+                    label="รีเซ็ตห้อง"
+                    sublabel="เริ่มห้องใหม่ทั้งหมด อาจเตะผู้เล่นออก"
                     icon={<Icon name="warning" size={18} />}
                     tone="danger"
                     onClick={() => setConfirmAction("reset")}
@@ -885,15 +910,15 @@ export default function OperatorPage() {
             </Card>
 
             <Card>
-              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>Game Setup</div>
+              <div style={{ fontSize: 22, fontWeight: 1100, color: TXT }}>ตั้งค่าเกม</div>
               <div style={{ marginTop: 4, color: MUTED, fontWeight: 900 }}>
-                Adjust gameplay timing only. No department settings here.
+                ปรับเฉพาะค่าที่เกี่ยวกับเกมเท่านั้น
               </div>
 
               <CardInner style={{ marginTop: 14 }}>
                 <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0,1fr))" }}>
                   <label style={{ display: "grid", gap: 6 }}>
-                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>Mode</div>
+                    <div style={{ color: MUTED, fontSize: 12, fontWeight: 900 }}>โหมด</div>
                     <select
                       value={form.mode}
                       onChange={(e) => setForm((prev) => ({ ...prev, mode: e.target.value }))}
@@ -915,7 +940,7 @@ export default function OperatorPage() {
                   </label>
 
                   <InputField
-                    label="Lobby (sec)"
+                    label="เวลานับถอยหลังก่อนเริ่ม (วิ)"
                     type="number"
                     min={0}
                     value={form.lobbySec}
@@ -923,7 +948,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Match (sec)"
+                    label="เวลาเล่นต่อรอบ (วิ)"
                     type="number"
                     min={5}
                     value={form.matchSec}
@@ -931,7 +956,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Warn (sec)"
+                    label="เวลาเตือนก่อนอีเวนต์ (วิ)"
                     type="number"
                     min={0}
                     value={form.warnSec}
@@ -939,7 +964,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Event min (sec)"
+                    label="อีเวนต์ต่ำสุด (วิ)"
                     type="number"
                     min={0}
                     value={form.eventMinSec}
@@ -947,7 +972,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Event max (sec)"
+                    label="อีเวนต์สูงสุด (วิ)"
                     type="number"
                     min={0}
                     value={form.eventMaxSec}
@@ -955,7 +980,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Between min (sec)"
+                    label="ช่วงห่างอีเวนต์ต่ำสุด (วิ)"
                     type="number"
                     min={0}
                     value={form.betweenMinSec}
@@ -963,7 +988,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Between max (sec)"
+                    label="ช่วงห่างอีเวนต์สูงสุด (วิ)"
                     type="number"
                     min={0}
                     value={form.betweenMaxSec}
@@ -971,7 +996,7 @@ export default function OperatorPage() {
                   />
 
                   <InputField
-                    label="Max team size"
+                    label="จำนวนสมาชิกทีมสูงสุด"
                     type="number"
                     min={1}
                     value={form.maxTeamSize}
@@ -983,7 +1008,7 @@ export default function OperatorPage() {
                     <input
                       type="password"
                       value={operatorKey}
-                      placeholder="Enter operator/admin key"
+                      placeholder="กรอกรหัส"
                       onChange={(e) => setOperatorKey(e.target.value)}
                       style={{
                         width: "100%",
@@ -1016,7 +1041,7 @@ export default function OperatorPage() {
                   }}
                 >
                   <Icon name="sparkle" size={18} />
-                  Apply Settings updates gameplay flow only. Department data stays untouched.
+                  หน้านี้ควบคุมเกมเท่านั้น และไม่แก้ไขข้อมูลแผนก
                 </div>
               </CardInner>
             </Card>
@@ -1026,9 +1051,9 @@ export default function OperatorPage() {
             <FlowGuideCard />
 
             <Card>
-              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>What each button does</div>
+              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>อธิบายแต่ละปุ่ม</div>
               <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
-                Simple guidance for agency staff
+                คู่มือสั้น ๆ สำหรับทีมงานจัดกิจกรรม
               </div>
 
               <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
@@ -1069,9 +1094,9 @@ export default function OperatorPage() {
             </Card>
 
             <Card>
-              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>Live Leaderboard</div>
+              <div style={{ fontSize: 20, fontWeight: 1100, color: TXT }}>กระดานคะแนนสด</div>
               <div style={{ marginTop: 8, color: MUTED, fontWeight: 900 }}>
-                Quick view of current results
+                ดูผลคะแนนปัจจุบันได้ทันที
               </div>
               <div style={{ marginTop: 12 }}>
                 <Leaderboard mode={cfg?.mode || "SOLO"} topPlayers={topPlayers || []} topTeams={topTeams || []} />
