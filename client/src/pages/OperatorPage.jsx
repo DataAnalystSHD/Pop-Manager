@@ -789,9 +789,9 @@ export default function OperatorPage() {
                 <StatusPill label="ห้อง" value={roomOpen ? "เปิด" : "ปิด"} tone={roomTone} />
                 <StatusPill label="สถานะ" value={phaseText} tone={phaseTone} />
                 <StatusPill label="โหมด" value={cfg?.mode || "SOLO"} tone={modeTone} />
-                <StatusPill label="ผู้เล่น" value={playersCount} />
-                <StatusPill label="ทีม" value={teamsCount} />
-                <StatusPill label="อีเวนต์" value={eventLabel} tone={event?.active ? "warning" : "default"} />
+                
+                
+                
               </div>
 
               {warn && (
