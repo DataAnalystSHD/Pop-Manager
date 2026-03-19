@@ -1,13 +1,14 @@
-// server/src/http/adminUpload.routes.js
 import express from "express";
 import multer from "multer";
-// FIX #4: Use fs.promises (async) instead of fs.readFileSync/writeFileSync.
-// Sync disk I/O blocks the entire Node.js event loop — all 400 WebSocket
-// connections stall until the read/write completes.
 import { readFile, writeFile } from "fs/promises";
 import path from "path";
 
-import { upsertManager, deleteManager, listManagers, getManagerBucket } from "../services/managerPop.service.js";
+import {
+  upsertManager,
+  deleteManager,
+  listManagers,
+  getManagerBucket,
+} from "../services/managerPop.service.js";
 
 const router = express.Router();
 
@@ -20,13 +21,24 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 3 * 1024 * 1024 }, // 3MB
   fileFilter: (_req, file, cb) => {
-    const ok = ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype);
-    cb(ok ? null : new Error("ONLY_JPG_PNG_WEBP"), ok);
+    const allowed = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+      "image/pjpeg",
+    ];
+    const ok = allowed.includes(file.mimetype);
+    cb(ok ? null : new Error(`ONLY_JPG_PNG_WEBP:${file.mimetype}`), ok);
   },
 });
 
+const managerUpload = upload.fields([
+  { name: "closed", maxCount: 1 },
+  { name: "open", maxCount: 1 },
+]);
+
 function requireAdminHttp(req, res, next) {
-  // allow OPTIONS preflight
   if (req.method === "OPTIONS") return next();
 
   const k = String(req.headers["x-admin-key"] || "");
@@ -49,7 +61,6 @@ function asStr(v) {
 }
 
 function readDeptJsonRaw() {
-  // NOTE: This now returns a Promise — all callers must await it.
   return readFile(DEPTS_PATH, "utf-8")
     .then((raw) => {
       const j = JSON.parse(raw);
@@ -63,8 +74,47 @@ function writeDeptJsonRaw(arr) {
   return writeFile(DEPTS_PATH, JSON.stringify(arr, null, 2), "utf-8");
 }
 
+function toUploadError(err) {
+  if (!err) {
+    return { status: 400, error: "UPLOAD_MIDDLEWARE_FAILED", message: "Unknown upload error" };
+  }
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return {
+        status: 400,
+        error: "FILE_TOO_LARGE",
+        message: "Image size must be 3MB or less",
+      };
+    }
+
+    return {
+      status: 400,
+      error: err.code || "MULTER_ERROR",
+      message: err.message || "Upload failed",
+    };
+  }
+
+  const raw = String(err.message || err || "UPLOAD_MIDDLEWARE_FAILED");
+
+  if (raw.startsWith("ONLY_JPG_PNG_WEBP:")) {
+    const mime = raw.split(":")[1] || "unknown";
+    return {
+      status: 400,
+      error: "INVALID_FILE_TYPE",
+      message: `Unsupported image type: ${mime}. Please use JPG, PNG, or WEBP`,
+    };
+  }
+
+  return {
+    status: 400,
+    error: "UPLOAD_MIDDLEWARE_FAILED",
+    message: raw,
+  };
+}
+
 /**
- * ========= MANAGER POP (existing) =========
+ * ========= MANAGER POP =========
  */
 
 // GET /api/admin/managers
@@ -73,19 +123,26 @@ router.get("/managers", async (_req, res) => {
     const managers = await listManagers();
     return res.json({ ok: true, bucket: getManagerBucket(), managers });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: "LIST_FAILED", message: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: "LIST_FAILED",
+      message: String(e?.message || e),
+    });
   }
 });
 
 // POST /api/admin/manager-pop
-router.post(
-  "/manager-pop",
-  requireAdminHttp,
-  upload.fields([
-    { name: "closed", maxCount: 1 },
-    { name: "open", maxCount: 1 },
-  ]),
-  async (req, res) => {
+router.post("/manager-pop", requireAdminHttp, (req, res) => {
+  managerUpload(req, res, async (err) => {
+    if (err) {
+      const mapped = toUploadError(err);
+      return res.status(mapped.status).json({
+        ok: false,
+        error: mapped.error,
+        message: mapped.message,
+      });
+    }
+
     try {
       const deptId = safeDeptId(req.body.deptId);
       const deptName = asStr(req.body.deptName || "");
@@ -94,19 +151,32 @@ router.post(
       const closedFile = req.files?.closed?.[0] || null;
       const openFile = req.files?.open?.[0] || null;
 
-      if (!deptId) return res.status(400).json({ ok: false, error: "MISSING_DEPT_ID" });
+      if (!deptId) {
+        return res.status(400).json({ ok: false, error: "MISSING_DEPT_ID" });
+      }
 
       if (!closedFile && !openFile && !deptName && !managerName) {
         return res.status(400).json({ ok: false, error: "NOTHING_TO_UPDATE" });
       }
 
-      const saved = await upsertManager({ deptId, deptName, managerName, closedFile, openFile });
+      const saved = await upsertManager({
+        deptId,
+        deptName,
+        managerName,
+        closedFile,
+        openFile,
+      });
+
       return res.json({ ok: true, ...saved });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: "UPLOAD_FAILED", message: String(e?.message || e) });
+      return res.status(500).json({
+        ok: false,
+        error: "UPLOAD_FAILED",
+        message: String(e?.message || e),
+      });
     }
-  }
-);
+  });
+});
 
 // DELETE /api/admin/manager/:deptId
 router.delete("/manager/:deptId", requireAdminHttp, async (req, res) => {
@@ -117,21 +187,25 @@ router.delete("/manager/:deptId", requireAdminHttp, async (req, res) => {
     await deleteManager(deptId);
     return res.json({ ok: true });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: "DELETE_FAILED", message: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: "DELETE_FAILED",
+      message: String(e?.message || e),
+    });
   }
 });
 
 /**
- * ========= NEW: DEPARTMENTS CRUD =========
+ * ========= DEPARTMENTS CRUD =========
  */
 
-// GET /api/admin/departments (raw from departments.json)
+// GET /api/admin/departments
 router.get("/departments", requireAdminHttp, async (_req, res) => {
   const depts = await readDeptJsonRaw();
   return res.json({ ok: true, departments: depts });
 });
 
-// POST /api/admin/departments  (add OR update name)
+// POST /api/admin/departments
 router.post("/departments", requireAdminHttp, async (req, res) => {
   try {
     const id = safeDeptId(req.body?.deptId);
@@ -152,7 +226,11 @@ router.post("/departments", requireAdminHttp, async (req, res) => {
     await writeDeptJsonRaw(depts);
     return res.json({ ok: true, dept: { id, name } });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: "DEPT_UPSERT_FAILED", message: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: "DEPT_UPSERT_FAILED",
+      message: String(e?.message || e),
+    });
   }
 });
 
@@ -170,7 +248,11 @@ router.delete("/departments/:deptId", requireAdminHttp, async (req, res) => {
 
     return res.json({ ok: true });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: "DEPT_DELETE_FAILED", message: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: "DEPT_DELETE_FAILED",
+      message: String(e?.message || e),
+    });
   }
 });
 
