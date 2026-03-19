@@ -1025,24 +1025,7 @@ export default function OperatorPage() {
                   </label>
                 </div>
 
-                <div
-                  style={{
-                    marginTop: 14,
-                    borderRadius: 16,
-                    border: `1px solid ${SUCCESS_RING}`,
-                    background: "linear-gradient(180deg, rgba(22,163,74,.10), rgba(255,255,255,.68))",
-                    boxShadow: SHADOW_SOFT,
-                    padding: "12px 14px",
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "center",
-                    color: TXT,
-                    fontWeight: 900,
-                  }}
-                >
-                  <Icon name="sparkle" size={18} />
-                  หน้านี้ควบคุมเกมเท่านั้น และไม่แก้ไขข้อมูลแผนก
-                </div>
+                
               </CardInner>
             </Card>
           </div>
